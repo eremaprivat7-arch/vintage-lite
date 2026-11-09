@@ -1,4 +1,5 @@
 import SwiftUI
+import Security
 import UIKit
 import Foundation
 
@@ -89,9 +90,21 @@ struct ThreeOneOSFiveApp: App {
                     appState.detectSupport()
                 }
             } else {
-                AccessKeyView(license: license)
+                if license.hasSavedKey {
+                    VStack(spacing: 16) {
+                        if license.busy || license.message.isEmpty {
+                            ProgressView("Проверяем доступ…")
+                        } else {
+                            Text(license.message)
+                            Button("Повторить проверку") { Task { await license.resume() } }
+                        }
+                    }
+                } else {
+                    AccessKeyView(license: license)
+                }
             }
             }
+            .task { await license.resume() }
             .onChange(of: scenePhase) { phase in
                 if phase == .background { license.suspend() }
                 if phase == .active { Task { await license.resume() } }
@@ -114,7 +127,39 @@ final class LicenseSession: ObservableObject {
     @Published private(set) var allowed = false
     @Published private(set) var busy = false
     @Published private(set) var message = ""
+    private static let item: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "VintageLite.activation",
+        kSecAttrAccount as String: "license"
+    ]
+    @Published private(set) var hasSavedKey = false
     private var activeKey = ""
+
+    init() {
+        var query = Self.item
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty {
+            activeKey = key
+            hasSavedKey = true
+        }
+    }
+
+    private func remember(_ key: String) throws {
+        if hasSavedKey && activeKey == key { return }
+        let attributes: [String: Any] = [
+            kSecValueData as String: Data(key.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        var status = SecItemUpdate(Self.item as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let item = Self.item.merging(attributes) { _, value in value }
+            status = SecItemAdd(item as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw LicenseFailure("Не удалось сохранить ключ на iPhone.") }
+        hasSavedKey = true
+    }
     private var generation = UUID()
     private var timer: Task<Void, Never>?
     private let client = URLSession(configuration: .ephemeral, delegate: LicenseTransport(), delegateQueue: nil)
@@ -162,8 +207,15 @@ final class LicenseSession: ObservableObject {
                   reply.valid == true, let seconds = reply.remaining, seconds > 0 else {
                 let reasons = ["expired": "Срок ключа истёк.", "full": "Все места на ключе заняты.",
                                "blocked": "Это устройство отключено.", "invalid": "Ключ неверный или отозван."]
+                if (response as? HTTPURLResponse)?.statusCode == 403,
+                   reasons[reply.error ?? ""] != nil {
+                    SecItemDelete(Self.item as CFDictionary)
+                    hasSavedKey = false
+                    activeKey = ""
+                }
                 throw LicenseFailure(reasons[reply.error ?? ""] ?? "Сервер не подтвердил доступ.")
             }
+            try remember(key)
             activeKey = key
             allowed = true
             timer = Task { [weak self] in
@@ -177,7 +229,6 @@ final class LicenseSession: ObservableObject {
             return true
         } catch {
             guard generation == attempt else { return false }
-            activeKey = ""
             allowed = false
             message = (error as? LicenseFailure)?.text ?? "Не удалось проверить ключ. Проверь подключение."
             return false
@@ -355,3 +406,4 @@ class AppState: ObservableObject {
         }
     }
 }
+
