@@ -12,6 +12,7 @@
   <header><div><div class="brand">VINTAGE LITE</div><h1>Ключи доступа</h1></div><button id="logout" class="hidden">Выйти</button></header>
   <section id="login-panel"><h2>Вход администратора</h2><form id="login-form" class="row"><label>Пароль администратора<input id="password" type="password" autocomplete="current-password" required></label><button class="primary">Войти</button></form><div id="login-message" class="status"></div></section>
   <div id="dashboard" class="hidden">
+    <section><h2>Режим патча</h2><button id="patch" disabled>Загрузка…</button><p id="patch-status" role="status"></p></section>
     <section><h2>Создать ключ</h2><form id="create-form" class="row">
       <label>Устройств<input name="seats" type="number" min="1" max="100000" value="1" required></label>
       <label>Срок<input name="duration" type="number" min="1" max="36500" value="1" required></label>
@@ -28,9 +29,23 @@ async function api(path,options={}){const headers={"X-Requested-With":"vintage-a
 function showError(node,error){node.textContent=error.message||String(error);node.className="status error"}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function setLoggedIn(ok){loginPanel.classList.toggle("hidden",ok);dashboard.classList.toggle("hidden",!ok);$("#logout").classList.toggle("hidden",!ok)}
-function statusOf(k){if(k.revoked)return "Отозван";if(k.expires&&k.expires<=Date.now()/1000)return "Истёк";return "Доступен"}
+let pauseStart = null;
+const patchButton = $("#patch");
+patchButton.onclick = async () => {
+  patchButton.disabled = true;
+  try {
+    await api("/admin/api/patch", { method: "POST", body: JSON.stringify({enabled: pauseStart === null}) });
+    await loadKeys();
+  } catch (error) { showError(notice, error); }
+  finally { patchButton.disabled = false; }
+};
+function statusOf(k){if(k.revoked)return "Отозван";if(k.expires&&k.expires<=(pauseStart ?? Date.now()/1000))return "Истёк";return "Доступен"}
 function formatExpiry(k){if(k.expires)return new Date(k.expires*1000).toLocaleString("ru-RU",{timeZone:"UTC"})+" UTC";return `С первой активации · ${Math.floor(k.lifetime/3600)} ч`}
-async function loadKeys(){const data=await api("/admin/api/keys");const devicesByKey=new Map();for(const d of data.devices){if(!devicesByKey.has(d.license))devicesByKey.set(d.license,[]);devicesByKey.get(d.license).push(d)}const root=$("#keys");if(!data.licenses.length){root.innerHTML='<p class="muted">Пока нет ключей.</p>';return}root.innerHTML=data.licenses.map(k=>{const devices=devicesByKey.get(k.id)||[];const active=devices.filter(d=>!d.blocked).length;return `<article class="card"><div class="card-head"><div><h2>…${esc(k.label)}</h2><div class="status">${esc(statusOf(k))} · ${active} / ${k.seats} устройств</div><p class="small">${esc(formatExpiry(k))}</p></div><div class="top-actions">${k.revoked?"":`<button data-action="revoke" data-id="${k.id}">Отозвать</button>`}<button class="danger" data-action="delete" data-id="${k.id}">Удалить</button></div></div>${devices.length?`<details><summary>Устройства (${devices.length})</summary>${devices.map(d=>`<div class="device"><code>${esc(d.device)}</code>${d.blocked?'<span class="small">Отключено</span>':`<button data-action="block" data-id="${k.id}" data-device="${esc(d.device)}">Отключить</button>`}</div>`).join("")}</details>`:""}</article>`}).join("")}
+async function loadKeys(){const data=await api("/admin/api/keys");pauseStart=data.started;
+patchButton.textContent=pauseStart===null?"Включить патч":"Завершить патч";
+$("#patch-status").textContent=pauseStart===null?"Вход открыт":"Вход закрыт. Сроки ключей приостановлены.";
+patchButton.disabled=false;
+const devicesByKey=new Map();for(const d of data.devices){if(!devicesByKey.has(d.license))devicesByKey.set(d.license,[]);devicesByKey.get(d.license).push(d)}const root=$("#keys");if(!data.licenses.length){root.innerHTML='<p class="muted">Пока нет ключей.</p>';return}root.innerHTML=data.licenses.map(k=>{const devices=devicesByKey.get(k.id)||[];const active=devices.filter(d=>!d.blocked).length;return `<article class="card"><div class="card-head"><div><h2>…${esc(k.label)}</h2><div class="status">${esc(statusOf(k))} · ${active} / ${k.seats} устройств</div><p class="small">${esc(formatExpiry(k))}</p></div><div class="top-actions">${k.revoked?"":`<button data-action="revoke" data-id="${k.id}">Отозвать</button>`}<button class="danger" data-action="delete" data-id="${k.id}">Удалить</button></div></div>${devices.length?`<details><summary>Устройства (${devices.length})</summary>${devices.map(d=>`<div class="device"><code>${esc(d.device)}</code>${d.blocked?'<span class="small">Отключено</span>':`<button data-action="block" data-id="${k.id}" data-device="${esc(d.device)}">Отключить</button>`}</div>`).join("")}</details>`:""}</article>`}).join("")}
 $("#login-form").addEventListener("submit",async e=>{e.preventDefault();const msg=$("#login-message");msg.textContent="";try{await api("/admin/api/login",{method:"POST",body:JSON.stringify({password:$("#password").value})});$("#password").value="";setLoggedIn(true);await loadKeys()}catch(err){showError(msg,err)}});
 $("#create-form").addEventListener("submit",async e=>{e.preventDefault();notice.textContent="";const f=new FormData(e.currentTarget),until=f.get("until");const payload={seats:Number(f.get("seats")),duration:Number(f.get("duration")),unit:f.get("unit"),until:until?`${until}:00Z`:""};try{const result=await api("/admin/api/keys",{method:"POST",body:JSON.stringify(payload)});const box=$("#new-key");box.classList.remove("hidden");box.innerHTML=`<div class="success">Скопируй ключ сейчас — повторно он не показывается.</div><code class="key">${esc(result.key)}</code><button id="copy-key">Скопировать</button>`;$("#copy-key").onclick=()=>navigator.clipboard.writeText(result.key);notice.textContent="Ключ создан.";notice.className="status success";await loadKeys()}catch(err){showError(notice,err)}});
 $("#keys").addEventListener("click",async e=>{const b=e.target.closest("button[data-action]");if(!b)return;const action=b.dataset.action;if(action==="delete"&&!confirm("Удалить ключ и его устройства навсегда?"))return;if(action==="revoke"&&!confirm("Отозвать ключ?"))return;let path=`/admin/api/keys/${b.dataset.id}`,method="POST";if(action==="revoke")path+="/revoke";if(action==="delete")method="DELETE";if(action==="block")path+=`/devices/${encodeURIComponent(b.dataset.device)}/block`;try{await api(path,{method});await loadKeys()}catch(err){showError(notice,err)}});

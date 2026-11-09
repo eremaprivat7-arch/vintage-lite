@@ -90,7 +90,19 @@ struct ThreeOneOSFiveApp: App {
                     appState.detectSupport()
                 }
             } else {
-                if license.hasSavedKey {
+                if license.maintenance {
+                    VStack(spacing: 14) {
+                        Text("Сейчас патч").font(.title.bold())
+                        Link("Напишите @osinxff", destination: URL(string: "https://t.me/osinxff")!)
+                    }
+                    .task {
+                        while !Task.isCancelled {
+                            do { try await Task.sleep(nanoseconds: 15_000_000_000) }
+                            catch { return }
+                            await license.resume()
+                        }
+                    }
+                } else if license.hasSavedKey {
                     VStack(spacing: 16) {
                         if license.busy || license.message.isEmpty {
                             ProgressView("Проверяем доступ…")
@@ -124,6 +136,7 @@ private final class LicenseTransport: NSObject, URLSessionTaskDelegate {
 
 @MainActor
 final class LicenseSession: ObservableObject {
+    @Published private(set) var maintenance = false
     @Published private(set) var allowed = false
     @Published private(set) var busy = false
     @Published private(set) var message = ""
@@ -172,7 +185,18 @@ final class LicenseSession: ObservableObject {
     }
 
     func resume() async {
-        if !activeKey.isEmpty && !busy && !allowed { _ = await verify(activeKey) }
+        guard !busy, !allowed else { return }
+        if !activeKey.isEmpty {
+            _ = await verify(activeKey)
+        } else if let base = Bundle.main.object(forInfoDictionaryKey: "LicenseServerURL") as? String,
+                  let url = URL(string: base)?.appendingPathComponent("api/status") {
+            let attempt = generation
+            struct Status: Decodable { let maintenance: Bool }
+            guard let (data, response) = try? await client.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200, generation == attempt,
+                  let status = try? JSONDecoder().decode(Status.self, from: data) else { return }
+            maintenance = status.maintenance
+        }
     }
 
     func checkForApply() async -> Bool {
@@ -203,6 +227,12 @@ final class LicenseSession: ObservableObject {
             guard generation == attempt else { return false }
             struct Reply: Decodable { let valid: Bool?; let remaining: Int?; let error: String? }
             let reply = try JSONDecoder().decode(Reply.self, from: data)
+            if (response as? HTTPURLResponse)?.statusCode == 503, reply.error == "maintenance" {
+                allowed = false
+                maintenance = true
+                return false
+            }
+            maintenance = false
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   reply.valid == true, let seconds = reply.remaining, seconds > 0 else {
                 let reasons = ["expired": "Срок ключа истёк.", "full": "Все места на ключе заняты.",

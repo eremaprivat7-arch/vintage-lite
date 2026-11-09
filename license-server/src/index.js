@@ -115,7 +115,32 @@ function validUUID(value) {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+async function patchStarted(env) {
+  const row = await env.DB.prepare("SELECT started FROM patch_mode WHERE id = 1").first();
+  return row.started;
+}
+
+async function changePatchMode(request, env) {
+  const body = await readJson(request).catch(() => null);
+  if (typeof body?.enabled !== "boolean") return errorResponse("invalid", 400);
+  if (body.enabled) {
+    await env.DB.prepare("UPDATE patch_mode SET started = unixepoch() WHERE id = 1 AND started IS NULL").run();
+  } else {
+    // Repeated resume requests see NULL and cannot extend a license twice.
+    await env.DB.batch([
+      env.DB.prepare(`
+        UPDATE licenses SET expires = expires + unixepoch() -
+          MAX(created, (SELECT started FROM patch_mode WHERE id = 1))
+        WHERE revoked = 0 AND expires > MAX(created, (SELECT started FROM patch_mode WHERE id = 1))
+      `),
+      env.DB.prepare("UPDATE patch_mode SET started = NULL WHERE id = 1"),
+    ]);
+  }
+  return json({ enabled: (await patchStarted(env)) !== null });
+}
+
 async function checkLicense(request, env) {
+  if ((await patchStarted(env)) !== null) return errorResponse("maintenance", 503);
   let body;
   try { body = await readJson(request); }
   catch (error) { return errorResponse(error.message === "too_large" ? "too_large" : "invalid", 400); }
@@ -191,7 +216,7 @@ async function listKeys(env) {
   const devices = await env.DB.prepare(
     "SELECT license, device, blocked FROM devices ORDER BY license DESC, device",
   ).all();
-  return json({ licenses: licenses.results || [], devices: devices.results || [] });
+  return json({ started: await patchStarted(env), licenses: licenses.results || [], devices: devices.results || [] });
 }
 
 async function createKey(request, env) {
@@ -230,6 +255,7 @@ async function adminApi(request, env, url) {
 
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
+  if (url.pathname === "/admin/api/patch" && request.method === "POST") return changePatchMode(request, env);
   if (url.pathname === "/admin/api/keys" && request.method === "GET") return listKeys(env);
   if (url.pathname === "/admin/api/keys" && request.method === "POST") return createKey(request, env);
 
@@ -264,6 +290,9 @@ export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
+      if (url.pathname === "/api/status" && request.method === "GET") {
+        return json({ maintenance: (await patchStarted(env)) !== null });
+      }
       if (url.pathname === "/api/check" && request.method === "POST") return await checkLicense(request, env);
       if (url.pathname.startsWith("/admin/api/")) return await adminApi(request, env, url);
       if (url.pathname === "/" || url.pathname === "/admin") {
