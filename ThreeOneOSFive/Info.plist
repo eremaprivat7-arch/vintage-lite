@@ -16,12 +16,8 @@
     <string>3105</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.1.1</string>
-    <key>CFBundleVersion</key>
-    <string>7</string>
     <key>LicenseServerURL</key>
-    <string></string>
+    <string>https://vintage-lite-license.vintage-lite-keys.workers.dev</string>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>AppReleaseDisplayVersion</key>
