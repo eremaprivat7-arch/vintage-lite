@@ -1,0 +1,26 @@
+name: Build Vintage Lite IPA
+on: [push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for iPhone
+        run: |
+          xcodebuild -project ThreeOneOSFive.xcodeproj -target 3105 \
+            -configuration Release -sdk iphoneos ARCHS=arm64 \
+            CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/products" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Package IPA
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p Payload
+          ditto products/3105.app Payload/3105.app
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/Vintage-Lite-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vintage-Lite-unsigned
+          path: Vintage-Lite-unsigned.ipa
+          if-no-files-found: error
