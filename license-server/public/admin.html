@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark"><title>Vintage Lite — ключи</title>
+  <style>
+    :root{color-scheme:dark;font:16px system-ui,sans-serif;background:#090a0b;color:#f6f6f6}*{box-sizing:border-box}body{margin:0}main{max-width:920px;margin:auto;padding:30px 18px 60px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}.brand{font-size:12px;letter-spacing:4px;color:#999}h1{font-size:32px;margin:6px 0 0}h2{font-size:19px;margin:0 0 16px}section,.card{background:#151719;border:1px solid #303234;border-radius:18px;padding:20px;margin:14px 0}.row{display:flex;align-items:center;flex-wrap:wrap;gap:10px}label{display:grid;gap:6px;color:#bdbdbd;font-size:13px}input,select,button{font:inherit;color:#fff;background:#242628;border:1px solid #44484b;border-radius:10px;padding:10px 12px}input[type=number]{width:115px}input[type=datetime-local]{min-width:235px}button{cursor:pointer}button.primary{background:#f5f5f5;color:#111;border-color:#f5f5f5;font-weight:700}button.danger{color:#ffaaaa}.muted{color:#a5a8aa}.status{font-size:13px;color:#bbb}.key{display:block;margin-top:9px;padding:12px;border-radius:10px;background:#0b0c0d;overflow-wrap:anywhere;font:600 16px ui-monospace,monospace}.hidden{display:none!important}.card-head{display:flex;align-items:start;justify-content:space-between;gap:16px}.small{font-size:13px;color:#aaa}.device{padding:8px 0;border-top:1px solid #303234;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}details{margin:12px 0}#notice{white-space:pre-wrap;margin-top:10px;color:#bfc2c4}.error{color:#ff9696!important}.success{color:#b6ed9c!important}.top-actions{display:flex;gap:8px}form{margin:0}
+    @media(max-width:600px){main{padding:22px 14px 40px}h1{font-size:27px}.card-head{display:block}.top-actions{margin-top:12px}}
+  </style>
+</head>
+<body><main>
+  <header><div><div class="brand">VINTAGE LITE</div><h1>Ключи доступа</h1></div><button id="logout" class="hidden">Выйти</button></header>
+  <section id="login-panel"><h2>Вход администратора</h2><form id="login-form" class="row"><label>Пароль администратора<input id="password" type="password" autocomplete="current-password" required></label><button class="primary">Войти</button></form><div id="login-message" class="status"></div></section>
+  <div id="dashboard" class="hidden">
+    <section><h2>Создать ключ</h2><form id="create-form" class="row">
+      <label>Устройств<input name="seats" type="number" min="1" max="100000" value="1" required></label>
+      <label>Срок<input name="duration" type="number" min="1" max="36500" value="1" required></label>
+      <label>Единицы<select name="unit"><option value="days">Дни</option><option value="hours">Часы</option></select></label>
+      <label>Или дата окончания (UTC)<input name="until" type="datetime-local"></label>
+      <button class="primary">Создать</button>
+    </form><div id="new-key" class="hidden"></div><div id="notice" class="status"></div></section>
+    <section><div class="card-head"><h2>Выпущенные ключи</h2><button id="refresh">Обновить</button></div><div id="keys"><p class="muted">Загрузка…</p></div></section>
+  </div>
+</main>
+<script>
+const $=s=>document.querySelector(s), loginPanel=$("#login-panel"), dashboard=$("#dashboard"), notice=$("#notice");
+async function api(path,options={}){const headers={"X-Requested-With":"vintage-admin",...(options.body?{"Content-Type":"application/json"}:{}),...(options.headers||{})};const r=await fetch(path,{credentials:"same-origin",...options,headers});let data={};try{data=await r.json()}catch{}if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);return data}
+function showError(node,error){node.textContent=error.message||String(error);node.className="status error"}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+function setLoggedIn(ok){loginPanel.classList.toggle("hidden",ok);dashboard.classList.toggle("hidden",!ok);$("#logout").classList.toggle("hidden",!ok)}
+function statusOf(k){if(k.revoked)return "Отозван";if(k.expires&&k.expires<=Date.now()/1000)return "Истёк";return "Доступен"}
+function formatExpiry(k){if(k.expires)return new Date(k.expires*1000).toLocaleString("ru-RU",{timeZone:"UTC"})+" UTC";return `С первой активации · ${Math.floor(k.lifetime/3600)} ч`}
+async function loadKeys(){const data=await api("/admin/api/keys");const devicesByKey=new Map();for(const d of data.devices){if(!devicesByKey.has(d.license))devicesByKey.set(d.license,[]);devicesByKey.get(d.license).push(d)}const root=$("#keys");if(!data.licenses.length){root.innerHTML='<p class="muted">Пока нет ключей.</p>';return}root.innerHTML=data.licenses.map(k=>{const devices=devicesByKey.get(k.id)||[];const active=devices.filter(d=>!d.blocked).length;return `<article class="card"><div class="card-head"><div><h2>…${esc(k.label)}</h2><div class="status">${esc(statusOf(k))} · ${active} / ${k.seats} устройств</div><p class="small">${esc(formatExpiry(k))}</p></div><div class="top-actions">${k.revoked?"":`<button data-action="revoke" data-id="${k.id}">Отозвать</button>`}<button class="danger" data-action="delete" data-id="${k.id}">Удалить</button></div></div>${devices.length?`<details><summary>Устройства (${devices.length})</summary>${devices.map(d=>`<div class="device"><code>${esc(d.device)}</code>${d.blocked?'<span class="small">Отключено</span>':`<button data-action="block" data-id="${k.id}" data-device="${esc(d.device)}">Отключить</button>`}</div>`).join("")}</details>`:""}</article>`}).join("")}
+$("#login-form").addEventListener("submit",async e=>{e.preventDefault();const msg=$("#login-message");msg.textContent="";try{await api("/admin/api/login",{method:"POST",body:JSON.stringify({password:$("#password").value})});$("#password").value="";setLoggedIn(true);await loadKeys()}catch(err){showError(msg,err)}});
+$("#create-form").addEventListener("submit",async e=>{e.preventDefault();notice.textContent="";const f=new FormData(e.currentTarget),until=f.get("until");const payload={seats:Number(f.get("seats")),duration:Number(f.get("duration")),unit:f.get("unit"),until:until?`${until}:00Z`:""};try{const result=await api("/admin/api/keys",{method:"POST",body:JSON.stringify(payload)});const box=$("#new-key");box.classList.remove("hidden");box.innerHTML=`<div class="success">Скопируй ключ сейчас — повторно он не показывается.</div><code class="key">${esc(result.key)}</code><button id="copy-key">Скопировать</button>`;$("#copy-key").onclick=()=>navigator.clipboard.writeText(result.key);notice.textContent="Ключ создан.";notice.className="status success";await loadKeys()}catch(err){showError(notice,err)}});
+$("#keys").addEventListener("click",async e=>{const b=e.target.closest("button[data-action]");if(!b)return;const action=b.dataset.action;if(action==="delete"&&!confirm("Удалить ключ и его устройства навсегда?"))return;if(action==="revoke"&&!confirm("Отозвать ключ?"))return;let path=`/admin/api/keys/${b.dataset.id}`,method="POST";if(action==="revoke")path+="/revoke";if(action==="delete")method="DELETE";if(action==="block")path+=`/devices/${encodeURIComponent(b.dataset.device)}/block`;try{await api(path,{method});await loadKeys()}catch(err){showError(notice,err)}});
+$("#refresh").onclick=()=>loadKeys().catch(err=>showError(notice,err));
+$("#logout").onclick=async()=>{try{await api("/admin/api/logout",{method:"POST"})}finally{setLoggedIn(false)}};
+api("/admin/api/keys").then(data=>{setLoggedIn(true);return loadKeys()}).catch(()=>setLoggedIn(false));
+</script></body></html>
