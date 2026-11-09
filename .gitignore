@@ -34,7 +34,8 @@ DerivedData/
 /*.png
 /tasks/
 /Tests/
-/.github/
+/.github/*
+!/.github/workflows/
 /CONTRIBUTING.md
 /SECURITY.md
 

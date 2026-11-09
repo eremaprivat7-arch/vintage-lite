@@ -78,7 +78,7 @@ enum PatchProjectLibrary {
                 let data = try readPackage(at: url)
                 let summary = try PatchPackageCodec.inspect(data)
                 let decoded: DecodedPatchPackage?
-                if isBundled && category == .fps && summary.isPasswordProtected {
+                if isBundled && summary.isPasswordProtected {
                     if let key = try? PatchKeyStore.load(for: summary),
                        let cached = try? PatchPackageCodec.decode(data, contentKey: key) {
                         decoded = cached

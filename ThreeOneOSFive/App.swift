@@ -1,10 +1,10 @@
 import SwiftUI
 import UIKit
-import CryptoKit
+import Foundation
 
 @main
 struct ThreeOneOSFiveApp: App {
-    @State private var unlocked = false
+    @StateObject private var license = LicenseSession()
     @StateObject private var appState = AppState()
     @StateObject private var patchDraftCoordinator = PatchDraftCoordinator()
     @StateObject private var fileOperationCoordinator = FileOperationCoordinator()
@@ -32,11 +32,13 @@ struct ThreeOneOSFiveApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if unlocked {
+            Group {
+            if license.allowed {
                 ZStack {
                     ContentView()
                         .preferredColorScheme(.dark)
                         .tint(.white)
+                        .environmentObject(license)
                         .environmentObject(appState)
                         .environmentObject(patchDraftCoordinator)
                         .environmentObject(fileOperationCoordinator)
@@ -86,20 +88,112 @@ struct ThreeOneOSFiveApp: App {
                     guard phase == .active, !showOnboarding else { return }
                     appState.detectSupport()
                 }
-                .onOpenURL { url in
-                    patchDraftCoordinator.presentImport(url)
-                }
             } else {
-                AccessKeyView { unlocked = true }
+                AccessKeyView(license: license)
+            }
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .background { license.suspend() }
+                if phase == .active { Task { await license.resume() } }
             }
         }
     }
 }
 
+private final class LicenseTransport: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+@MainActor
+final class LicenseSession: ObservableObject {
+    @Published private(set) var allowed = false
+    @Published private(set) var busy = false
+    @Published private(set) var message = ""
+    private var activeKey = ""
+    private var generation = UUID()
+    private var timer: Task<Void, Never>?
+    private let client = URLSession(configuration: .ephemeral, delegate: LicenseTransport(), delegateQueue: nil)
+
+    func suspend() {
+        generation = UUID()
+        timer?.cancel()
+        busy = false
+        allowed = false
+    }
+
+    func resume() async {
+        if !activeKey.isEmpty && !busy && !allowed { _ = await verify(activeKey) }
+    }
+
+    func checkForApply() async -> Bool {
+        guard allowed, !activeKey.isEmpty else { return false }
+        return await verify(activeKey)
+    }
+
+    func verify(_ supplied: String) async -> Bool {
+        let attempt = UUID()
+        generation = attempt
+        timer?.cancel()
+        busy = true
+        message = ""
+        let key = supplied.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { if generation == attempt { busy = false } }
+        do {
+            guard let configured = Bundle.main.object(forInfoDictionaryKey: "LicenseServerURL") as? String,
+                  let base = URL(string: configured), base.scheme == "https", base.host != nil,
+                  let device = UIDevice.current.identifierForVendor else {
+                throw LicenseFailure("Сервер ключей не настроен.")
+            }
+            var request = URLRequest(url: base.appendingPathComponent("api/check"))
+            request.httpMethod = "POST"
+            request.timeoutInterval = 10
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(["key": key, "device": device.uuidString])
+            let (data, response) = try await client.data(for: request)
+            guard generation == attempt else { return false }
+            struct Reply: Decodable { let valid: Bool?; let remaining: Int?; let error: String? }
+            let reply = try JSONDecoder().decode(Reply.self, from: data)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  reply.valid == true, let seconds = reply.remaining, seconds > 0 else {
+                let reasons = ["expired": "Срок ключа истёк.", "full": "Все места на ключе заняты.",
+                               "blocked": "Это устройство отключено.", "invalid": "Ключ неверный или отозван."]
+                throw LicenseFailure(reasons[reply.error ?? ""] ?? "Сервер не подтвердил доступ.")
+            }
+            activeKey = key
+            allowed = true
+            timer = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: UInt64(min(seconds, 30)) * 1_000_000_000) }
+                catch { return }
+                guard let self, self.generation == attempt else { return }
+                if seconds <= 30 { self.allowed = false }
+                // A separate task lets verify cancel the previous timer without cancelling the request.
+                Task { _ = await self.verify(key) }
+            }
+            return true
+        } catch {
+            guard generation == attempt else { return false }
+            activeKey = ""
+            allowed = false
+            message = (error as? LicenseFailure)?.text ?? "Не удалось проверить ключ. Проверь подключение."
+            return false
+        }
+    }
+
+    private struct LicenseFailure: Error {
+        let text: String
+        init(_ text: String) { self.text = text }
+    }
+}
+
 private struct AccessKeyView: View {
-    let onUnlock: () -> Void
+    @ObservedObject var license: LicenseSession
     @State private var key = ""
-    @State private var invalid = false
+
 
     @State private var revealKey = false
 
@@ -134,13 +228,14 @@ private struct AccessKeyView: View {
                     .padding(.leading, 16).padding(.trailing, 4).padding(.vertical, 4)
                     .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.18)))
-                    if invalid { Text("Неверный ключ").foregroundStyle(.red) }
+                    if !license.message.isEmpty { Text(license.message).foregroundStyle(.red) }
                     Button(action: validate) {
-                        Text("АКТИВИРОВАТЬ").font(.headline.weight(.heavy)).tracking(1.5)
+                        Text(license.busy ? "ПРОВЕРЯЕМ…" : "АКТИВИРОВАТЬ").font(.headline.weight(.heavy)).tracking(1.5)
                             .frame(maxWidth: .infinity).padding(.vertical, 17)
                             .foregroundStyle(.black).background(.white, in: RoundedRectangle(cornerRadius: 16))
                     }
                 }
+                .disabled(license.busy)
                 .padding(28).frame(maxWidth: 480)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
@@ -150,13 +245,8 @@ private struct AccessKeyView: View {
     }
 
     private func validate() {
-        let normalized = key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let digest = SHA256.hash(data: Data(normalized.utf8))
-        if digest.map({ String(format: "%02x", $0) }).joined() == "7d115c541bfbba6fde88baad9a82a83f28fa962e455f82e79289c84552c96592" {
-            onUnlock()
-        } else {
-            invalid = true
-        }
+        guard !license.busy else { return }
+        Task { _ = await license.verify(key) }
     }
 }
 
