@@ -8,6 +8,34 @@ enum PatchPackageCodec {
     static let latestSchemaVersion = 2
     private static let minimumSchemaVersion = 1
 
+    private static func canRead(version: Int) -> Bool {
+        (minimumSchemaVersion...latestSchemaVersion).contains(version) || version == 9
+    }
+
+    // The v1/v2 apply service implements application-container replacements only.
+    private struct V9Features: Decodable {
+        struct Project: Decodable {
+            struct Rule: Decodable { let operation: String; let containerKind: String }
+            struct Directory: Decodable { let containerKind: String }
+            let settings: [String]
+            let appGroupIdentifiers: [String]
+            let systemAppGroupIdentifiers: [String]
+            let rules: [Rule]
+            let directories: [Directory]
+        }
+        let project: Project
+
+        static func validate(_ data: Data) throws {
+            guard let features = try? PropertyListDecoder().decode(Self.self, from: data).project,
+                  features.settings.isEmpty, features.appGroupIdentifiers.isEmpty,
+                  features.systemAppGroupIdentifiers.isEmpty,
+                  features.rules.allSatisfy({ $0.operation == "replace" && $0.containerKind == "application" }),
+                  features.directories.allSatisfy({ $0.containerKind == "application" }) else {
+                throw PatchPackageError.unsupportedVersion
+            }
+        }
+    }
+
     private struct Envelope: Codable {
         let schemaVersion: Int
         let keyAADVersion: Int?
@@ -256,6 +284,7 @@ enum PatchPackageCodec {
             key: contentKey,
             aad: payloadAAD(for: envelope.packageID, version: envelope.schemaVersion)
         )
+        if envelope.schemaVersion == 9 { try V9Features.validate(payloadData) }
         let decoder = PropertyListDecoder()
         let payload = try decoder.decode(Payload.self, from: payloadData)
         guard payload.project.id == envelope.packageID else {
@@ -346,7 +375,7 @@ enum PatchPackageCodec {
         } catch {
             throw PatchPackageError.invalidPasswordOrCorruptedPackage
         }
-        guard (minimumSchemaVersion...latestSchemaVersion).contains(envelope.schemaVersion) else {
+        guard canRead(version: envelope.schemaVersion) else {
             throw PatchPackageError.unsupportedVersion
         }
         guard envelope.keyFingerprint.count == 32,
@@ -356,9 +385,7 @@ enum PatchPackageCodec {
         }
         if envelope.isPasswordProtected {
             guard envelope.publicContentKey == nil,
-                  (minimumSchemaVersion...latestSchemaVersion).contains(
-                    envelope.keyAADVersion ?? envelope.schemaVersion
-                  ),
+                  canRead(version: envelope.keyAADVersion ?? envelope.schemaVersion),
                   envelope.kdfSalt?.count == 16,
                   let iterations = envelope.kdfIterations,
                   iterations >= PatchPackageLimits.minimumKDFIterations,
