@@ -29,6 +29,9 @@ struct ThreeOneOSFiveApp: App {
             if license.allowed {
                 ZStack {
                     ContentView()
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            LicenseBanner(license: license)
+                        }
                         .preferredColorScheme(.dark)
                         .tint(.white)
                         .environmentObject(license)
@@ -124,7 +127,8 @@ final class LicenseSession: ObservableObject {
         kSecAttrAccount as String: "license"
     ]
     @Published private(set) var hasSavedKey = false
-    private var activeKey = ""
+    @Published private(set) var expiresAt: Date?
+    private(set) var activeKey = ""
 
     init() {
         var query = Self.item
@@ -225,6 +229,7 @@ final class LicenseSession: ObservableObject {
             }
             try remember(key)
             activeKey = key
+            expiresAt = Date().addingTimeInterval(TimeInterval(seconds))
             allowed = true
             timer = Task { [weak self] in
                 do { try await Task.sleep(nanoseconds: UInt64(min(seconds, 30)) * 1_000_000_000) }
@@ -246,6 +251,52 @@ final class LicenseSession: ObservableObject {
     private struct LicenseFailure: Error {
         let text: String
         init(_ text: String) { self.text = text }
+    }
+}
+
+private struct PurchaseContact: View {
+    var body: some View {
+        Link("По покупке ключа · @osinxff", destination: URL(string: "https://t.me/osinxff")!)
+        if let address = Bundle.main.object(forInfoDictionaryKey: "TelegramChannelURL") as? String,
+           let url = URL(string: address), url.scheme == "https", url.host == "t.me" {
+            Link("Наш Telegram-канал", destination: url)
+        }
+    }
+}
+
+private struct LicenseBanner: View {
+    @ObservedObject var license: LicenseSession
+    @State private var details = false
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            copied = false
+            details = true
+        } label: {
+            HStack {
+                TimelineView(.periodic(from: .now, by: 1)) { tick in
+                    let seconds = max(0, Int(ceil((license.expiresAt ?? tick.date).timeIntervalSince(tick.date))))
+                    Text("Ключ · " + String(format: "%d д %02d:%02d:%02d", seconds / 86400, seconds / 3600 % 24, seconds / 60 % 60, seconds % 60))
+                        .monospacedDigit()
+                }
+                Spacer()
+                Text("Получить бонус ›")
+            }.font(.footnote.weight(.semibold)).padding(.horizontal).padding(.vertical, 8)
+        }
+        .sheet(isPresented: $details) {
+            VStack(spacing: 18) {
+                Text("Бонус за ключ").font(.title2.bold())
+                Text("Скопируй ключ и отправь его в личный чат @vintagelite_bot. Бонус за личный ключ выдаётся один раз.")
+                Button(copied ? "Ключ скопирован" : "Скопировать мой ключ") {
+                    UIPasteboard.general.string = license.activeKey
+                    copied = true
+                }
+                Link("Открыть бота", destination: URL(string: "https://t.me/vintagelite_bot")!)
+                PurchaseContact()
+                Button("Закрыть") { details = false }
+            }.padding().presentationDetents([.medium, .large])
+        }
     }
 }
 
@@ -293,6 +344,7 @@ private struct AccessKeyView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 17)
                             .foregroundStyle(.black).background(.white, in: RoundedRectangle(cornerRadius: 16))
                     }
+                    PurchaseContact()
                 }
                 .disabled(license.busy)
                 .padding(28).frame(maxWidth: 480)
