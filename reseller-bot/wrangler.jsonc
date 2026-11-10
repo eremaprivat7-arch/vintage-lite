@@ -1,0 +1,6 @@
+{
+  "name":"vintage-lite-reseller",
+  "main":"worker.js",
+  "compatibility_date":"2025-01-01",
+  "d1_databases":[{"binding":"DB","database_name":"vintage-lite-keys","database_id":"17af1ecb-f1b5-408b-800d-2de448a1e3ba"}]
+}
