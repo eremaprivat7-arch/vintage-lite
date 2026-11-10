@@ -6,7 +6,6 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var patchDraftCoordinator: PatchDraftCoordinator
     @State private var tabNavigation: AppTabNavigationState
-    @AppStorage(FeatureVisibility.cleanerStorageKey) private var cleanerEnabled = true
     @AppStorage(FeatureVisibility.wallpapersStorageKey) private var wallpapersEnabled = true
 
     init() {
@@ -45,9 +44,6 @@ struct ContentView: View {
         }
         .onChange(of: patchDraftCoordinator.importRequest?.id) { requestID in
             if requestID != nil { tabNavigation.select(AppSection.patches.rawValue) }
-        }
-        .onChange(of: cleanerEnabled) { _ in
-            tabNavigation.reconcileSelection(with: featureVisibility)
         }
         .onChange(of: wallpapersEnabled) { _ in
             tabNavigation.reconcileSelection(with: featureVisibility)
@@ -111,7 +107,6 @@ struct ContentView: View {
         switch section {
         case .home:
             DashboardView(
-                cleanerEnabled: $cleanerEnabled,
                 wallpapersEnabled: $wallpapersEnabled,
                 wallpapersSupported: wallpapersSupported
             )
@@ -144,7 +139,6 @@ struct ContentView: View {
 
     private var featureVisibility: FeatureVisibility {
         FeatureVisibility(
-            cleanerEnabled: cleanerEnabled,
             wallpapersEnabled: wallpapersEnabled,
             wallpapersSupported: wallpapersSupported
         )
@@ -209,7 +203,6 @@ private struct DashboardView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showSettings = false
     @State private var showLogs = false
-    @Binding var cleanerEnabled: Bool
     @Binding var wallpapersEnabled: Bool
     let wallpapersSupported: Bool
 
@@ -217,7 +210,7 @@ private struct DashboardView: View {
         NavigationStack {
             List {
                 deviceSection
-                featuresSection
+                if wallpapersSupported { featuresSection }
             }
             .navigationBarTitleDisplayMode(.inline)
             .tint(AppTheme.accent)
@@ -242,9 +235,6 @@ private struct DashboardView: View {
 
     private var featuresSection: some View {
         Section {
-            Toggle(isOn: $cleanerEnabled) {
-                Label(language.text("tab.cleaner"), systemImage: "sparkles")
-            }
             if wallpapersSupported {
                 Toggle(isOn: $wallpapersEnabled) {
                     Label(language.text("tab.wallpapers"), systemImage: "photo.on.rectangle.angled")
