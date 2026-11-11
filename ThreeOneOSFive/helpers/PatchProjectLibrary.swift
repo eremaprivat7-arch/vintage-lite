@@ -4,8 +4,26 @@ enum PatchCategory: String, CaseIterable {
     case fps = "FPSBoost"
     case skin = "ModSkin"
 
-    var title: String { self == .fps ? "FPS Boost" : "Mod Skin" }
-    var icon: String { self == .fps ? "speedometer" : "tshirt.fill" }
+    case frameRate = "FPS"
+    case holo = "Holo"
+
+    var title: String {
+        switch self {
+        case .fps: return "Boost"
+        case .skin: return "Mod Skin"
+        case .frameRate: return "FPS"
+        case .holo: return "Holo"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .fps: return "bolt.fill"
+        case .skin: return "tshirt.fill"
+        case .frameRate: return "speedometer"
+        case .holo: return "cube"
+        }
+    }
 }
 
 struct PatchLibraryItem: Identifiable {

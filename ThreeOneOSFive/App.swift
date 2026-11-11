@@ -10,7 +10,6 @@ struct ThreeOneOSFiveApp: App {
     @StateObject private var patchDraftCoordinator = PatchDraftCoordinator()
     @StateObject private var fileOperationCoordinator = FileOperationCoordinator()
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
-    @State private var showOnboarding = OnboardingStore.shouldShow()
     @State private var showAttribution = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -27,47 +26,24 @@ struct ThreeOneOSFiveApp: App {
         WindowGroup {
             Group {
             if license.allowed {
-                ZStack {
-                    ContentView()
-                        .safeAreaInset(edge: .top, spacing: 0) {
-                            LicenseBanner(license: license)
-                        }
-                        .preferredColorScheme(.dark)
-                        .tint(.white)
-                        .environmentObject(license)
-                        .environmentObject(appState)
-                        .environmentObject(patchDraftCoordinator)
-                        .environmentObject(fileOperationCoordinator)
-                        .environment(\.appLanguage, language)
-                        .environment(\.locale, language.locale)
-                        .opacity(showOnboarding ? 0 : 1)
-                        .allowsHitTesting(!showOnboarding)
-
-                    if showOnboarding {
-                        OnboardingView {
-                            OnboardingStore.markCompleted()
-                            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                                showOnboarding = false
-                            }
-                            appState.detectSupport()
-                        }
-                        .environment(\.appLanguage, language)
-                        .environment(\.locale, language.locale)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                        .zIndex(1)
-                    }
-                }
-                .displayIdentityAttribution(isPresented: $showAttribution, enabled: !showOnboarding)
+                ContentView()
+                    .preferredColorScheme(.dark)
+                    .tint(.white)
+                    .environmentObject(license)
+                    .environmentObject(appState)
+                    .environmentObject(patchDraftCoordinator)
+                    .environmentObject(fileOperationCoordinator)
+                    .environment(\.appLanguage, language)
+                    .environment(\.locale, language.locale)
+                    .displayIdentityAttribution(isPresented: $showAttribution, enabled: true)
                 .sheet(isPresented: $showAttribution) {
                     DisplayAttributionSheet()
                 }
                 .onAppear {
-                    if !showOnboarding {
-                        appState.detectSupport()
-                    }
+                    appState.detectSupport()
                 }
                 .onChange(of: scenePhase) { phase in
-                    guard phase == .active, !showOnboarding else { return }
+                    guard phase == .active else { return }
                     appState.detectSupport()
                 }
             } else {
@@ -264,38 +240,66 @@ private struct PurchaseContact: View {
     }
 }
 
-private struct LicenseBanner: View {
-    @ObservedObject var license: LicenseSession
-    @State private var details = false
+struct LicenseAccountView: View {
+    @EnvironmentObject private var license: LicenseSession
     @State private var copied = false
+    private let mint = Color(red: 0.40, green: 0.91, blue: 0.74)
 
     var body: some View {
-        Button {
-            copied = false
-            details = true
-        } label: {
-            HStack {
-                TimelineView(.periodic(from: .now, by: 1)) { tick in
-                    let seconds = max(0, Int(ceil((license.expiresAt ?? tick.date).timeIntervalSince(tick.date))))
-                    Text("Ключ · " + String(format: "%d д %02d:%02d:%02d", seconds / 86400, seconds / 3600 % 24, seconds / 60 % 60, seconds % 60))
-                        .monospacedDigit()
-                }
-                Spacer()
-                Text("Получить бонус ›")
-            }.font(.footnote.weight(.semibold)).padding(.horizontal).padding(.vertical, 8)
-        }
-        .sheet(isPresented: $details) {
-            VStack(spacing: 18) {
-                Text("Бонус за ключ").font(.title2.bold())
-                Text("Скопируй ключ и отправь его в личный чат @vintagelite_bot. Бонус за личный ключ выдаётся один раз.")
-                Button(copied ? "Ключ скопирован" : "Скопировать мой ключ") {
-                    UIPasteboard.general.string = license.activeKey
-                    copied = true
-                }
-                Link("Открыть бота", destination: URL(string: "https://t.me/vintagelite_bot")!)
-                PurchaseContact()
-                Button("Закрыть") { details = false }
-            }.padding().presentationDetents([.medium, .large])
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text("VINTAGE LITE").font(.title.bold())
+                        Spacer()
+                        Image(systemName: "bolt.fill").font(.title)
+                    }
+                    .foregroundStyle(.black).padding(22)
+                    .background(mint, in: RoundedRectangle(cornerRadius: 20))
+
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let end = license.expiresAt {
+                            TimelineView(.periodic(from: .now, by: 1)) { tick in
+                                let seconds = max(0, Int(ceil(end.timeIntervalSince(tick.date))))
+                                VStack(alignment: .leading, spacing: 14) {
+                                    Label(seconds > 0 ? "Ключ активен" : "Срок истёк",
+                                          systemImage: "clock").font(.subheadline.bold())
+                                    Text(String(format: "%d д %02d:%02d:%02d", seconds / 86400,
+                                                seconds / 3600 % 24, seconds / 60 % 60, seconds % 60))
+                                        .font(.system(size: 38, weight: .bold, design: .rounded))
+                                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                                }.foregroundStyle(mint)
+                            }
+                            Divider()
+                            Text("Действует до").foregroundStyle(.secondary)
+                            Text(end.formatted(date: .long, time: .shortened))
+                        } else {
+                            Text("Уточняем срок ключа…")
+                        }
+                        Divider()
+                        Text("Ключ на этом устройстве").foregroundStyle(.secondary)
+                        Text("•••• " + String(license.activeKey.suffix(4))).monospaced()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Бонус за ключ").font(.headline)
+                        Text("Скопируй ключ и отправь его боту в личном чате.")
+                            .foregroundStyle(.secondary)
+                        Button(copied ? "Ключ скопирован" : "Скопировать ключ") {
+                            UIPasteboard.general.string = license.activeKey
+                            copied = true
+                        }
+                        Link("Получить бонус", destination: URL(string: "https://t.me/vintagelite_bot")!)
+                        Divider()
+                        PurchaseContact()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+                }.frame(maxWidth: 560).padding().frame(maxWidth: .infinity)
+            }
+            .navigationTitle("Аккаунт")
         }
     }
 }
@@ -344,7 +348,6 @@ private struct AccessKeyView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 17)
                             .foregroundStyle(.black).background(.white, in: RoundedRectangle(cornerRadius: 16))
                     }
-                    PurchaseContact()
                 }
                 .disabled(license.busy)
                 .padding(28).frame(maxWidth: 480)

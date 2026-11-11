@@ -6,7 +6,6 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var patchDraftCoordinator: PatchDraftCoordinator
     @State private var tabNavigation: AppTabNavigationState
-    @AppStorage(FeatureVisibility.wallpapersStorageKey) private var wallpapersEnabled = true
 
     init() {
 #if targetEnvironment(simulator)
@@ -45,9 +44,6 @@ struct ContentView: View {
         .onChange(of: patchDraftCoordinator.importRequest?.id) { requestID in
             if requestID != nil { tabNavigation.select(AppSection.patches.rawValue) }
         }
-        .onChange(of: wallpapersEnabled) { _ in
-            tabNavigation.reconcileSelection(with: featureVisibility)
-        }
         .onAppear {
             tabNavigation.reconcileSelection(with: featureVisibility)
         }
@@ -59,7 +55,7 @@ struct ContentView: View {
                 sectionContent(section)
                     .tabItem {
                         CompactTabLabel(
-                            title: language.text(section.titleKey),
+                            title: section == .wallpapers ? "Аккаунт" : language.text(section.titleKey),
                             systemImage: section.systemImage
                         )
                     }
@@ -77,7 +73,7 @@ struct ContentView: View {
                             tabNavigation.select(section.rawValue)
                         }
                     } label: {
-                        Label(language.text(section.titleKey), systemImage: section.systemImage)
+                        Label(section == .wallpapers ? "Аккаунт" : language.text(section.titleKey), systemImage: section.systemImage)
                             .fontWeight(section.rawValue == tabNavigation.selectedTab ? .semibold : .regular)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -106,10 +102,7 @@ struct ContentView: View {
     private func sectionContent(_ section: AppSection) -> some View {
         switch section {
         case .home:
-            DashboardView(
-                wallpapersEnabled: $wallpapersEnabled,
-                wallpapersSupported: wallpapersSupported
-            )
+            DashboardView()
         case .files:
             AppDataBrowserView(
                 tabSession: filesTabSession
@@ -119,7 +112,7 @@ struct ContentView: View {
         case .cleaner:
             CleanerView()
         case .wallpapers:
-            WallpaperLabView()
+            LicenseAccountView()
         }
     }
 
@@ -138,14 +131,7 @@ struct ContentView: View {
     }
 
     private var featureVisibility: FeatureVisibility {
-        FeatureVisibility(
-            wallpapersEnabled: wallpapersEnabled,
-            wallpapersSupported: wallpapersSupported
-        )
-    }
-
-    private var wallpapersSupported: Bool {
-        WallpaperFeatureSupportPolicy.isSupported(major: AppInfo.versionTuple.major)
+        FeatureVisibility(wallpapersEnabled: true)
     }
 
     private var selectedVisibleSection: AppSection {
@@ -193,7 +179,7 @@ private extension AppSection {
         case .files: return "folder.fill"
         case .patches: return "shippingbox.fill"
         case .cleaner: return "sparkles"
-        case .wallpapers: return "photo.on.rectangle.angled"
+        case .wallpapers: return "person.crop.circle.fill"
         }
     }
 }
@@ -203,14 +189,11 @@ private struct DashboardView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showSettings = false
     @State private var showLogs = false
-    @Binding var wallpapersEnabled: Bool
-    let wallpapersSupported: Bool
 
     var body: some View {
         NavigationStack {
             List {
                 deviceSection
-                if wallpapersSupported { featuresSection }
             }
             .navigationBarTitleDisplayMode(.inline)
             .tint(AppTheme.accent)
@@ -230,20 +213,6 @@ private struct DashboardView: View {
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showLogs) { LogView() }
-        }
-    }
-
-    private var featuresSection: some View {
-        Section {
-            if wallpapersSupported {
-                Toggle(isOn: $wallpapersEnabled) {
-                    Label(language.text("tab.wallpapers"), systemImage: "photo.on.rectangle.angled")
-                }
-            }
-        } header: {
-            Text(language.text("dashboard.features"))
-        } footer: {
-            Text(language.text("dashboard.features_footer"))
         }
     }
 
