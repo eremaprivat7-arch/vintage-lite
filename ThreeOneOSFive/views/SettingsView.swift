@@ -11,11 +11,15 @@ struct SettingsView: View {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        AppLogo()
+                        Image("VintageLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("3105").font(.headline)
-                            Text(language.text("common.version", appVersion))
+                            Text("VintageLite").font(.headline)
+                            Text("Версия \(VintageRelease.version) · сборка \(VintageRelease.build)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -64,45 +68,11 @@ struct SettingsView: View {
                     Text(language.text("settings.supported_versions_footer"))
                 }
 
-                Section(language.text("settings.social_media")) {
-                    creditsRow(
-                        name: "GitHub",
-                        role: language.text("social.github_role"),
-                        url: "https://github.com/YangJiiii/3105"
-                    )
-                    creditsRow(
-                        name: "Cộng Đồng IOSVN",
-                        role: language.text("social.iosvn_role"),
-                        url: "https://t.me/ioscrackvn"
-                    )
-                }
-
-                Section(language.text("settings.credits")) {
-                    creditsRow(
-                        name: "YangJiii",
-                        role: language.text("credit.yangjiii"),
-                        url: "https://x.com/duongduong0908"
-                    )
-                    creditsRow(
-                        name: "0xjohnnydev",
-                        role: language.text("credit.filzaslop"),
-                        url: "https://github.com/0xjohnnydev/FilzaSlop"
-                    )
-                    creditsRow(
-                        name: "LeminLimez",
-                        role: language.text("credit.pocket_poster"),
-                        url: "https://github.com/leminlimez/Pocket-Poster"
-                    )
-                    creditsRow(
-                        name: "CrazyMind90",
-                        role: language.text("credit.sandbox_escape"),
-                        url: "https://github.com/CrazyMind90"
-                    )
-                    creditsRow(
-                        name: "forcequitOS",
-                        role: language.text("credit.forcequit"),
-                        url: "https://github.com/forcequitOS"
-                    )
+                Section("Социальные сети") {
+                    creditsRow(name: "@osinxshop", role: "Telegram-канал · обновления",
+                               url: "https://t.me/osinxshop")
+                    creditsRow(name: "@osinxff", role: "Поддержка и покупка ключа",
+                               url: "https://t.me/osinxff")
                 }
             }
             .tint(AppTheme.accent)
@@ -115,12 +85,6 @@ struct SettingsView: View {
                 }
             }
         }
-    }
-
-    private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
-            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            ?? "1.0"
     }
 
     private func versionLabel(

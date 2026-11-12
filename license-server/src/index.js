@@ -1,3 +1,6 @@
+import { releaseIdentity, releaseBlocked, releaseList, saveRelease, updateNotice } from "./releases.js";
+import {report,reveal,issuedKey} from "./dashboard.js";
+import {manage,reseller} from './reseller.js';
 const encoder = new TextEncoder();
 const SESSION_SECONDS = 12 * 60 * 60;
 const COOKIE_NAME = "vl_admin";
@@ -140,10 +143,14 @@ async function changePatchMode(request, env) {
 }
 
 async function checkLicense(request, env) {
-  if ((await patchStarted(env)) !== null) return errorResponse("maintenance", 503);
   let body;
   try { body = await readJson(request); }
   catch (error) { return errorResponse(error.message === "too_large" ? "too_large" : "invalid", 400); }
+
+  const identity = releaseIdentity(body.app_version, body.app_build);
+  if (!identity) return errorResponse("invalid_version", 400);
+  if (await releaseBlocked(env, identity)) return json(updateNotice(), 503);
+  if ((await patchStarted(env)) !== null) return errorResponse("maintenance", 503);
 
   if (typeof body.key !== "string" || !validUUID(body.device)) return errorResponse("invalid", 400);
   const supplied = body.key.trim().toUpperCase();
@@ -237,12 +244,16 @@ async function createKey(request, env) {
     expires = Math.floor(parsed / 1000);
   }
 
-  const key = randomKey();
+  const seed = "manual:" + crypto.randomUUID();
+  const key = env.KEY_SECRET ? await issuedKey(env.KEY_SECRET,seed) : randomKey();
   const digest = await sha256(key);
   const lifetime = duration * (unit === "hours" ? 3600 : 86400);
-  await env.DB.prepare(
+  const insert = env.DB.prepare(
     "INSERT INTO licenses (digest, label, seats, lifetime, expires, created) VALUES (?, ?, ?, ?, ?, ?)",
-  ).bind(digest, key.slice(-8), seats, lifetime, expires, Math.floor(Date.now() / 1000)).run();
+  ).bind(digest, key.slice(-8), seats, lifetime, expires, Math.floor(Date.now() / 1000));
+  if (env.KEY_SECRET) {
+    await env.DB.batch([insert,env.DB.prepare("INSERT INTO portal_manual_keys VALUES(?,?)").bind(digest,seed)]);
+  } else await insert.run();
   return json({ key, label: key.slice(-8) }, 201);
 }
 
@@ -255,6 +266,34 @@ async function adminApi(request, env, url) {
 
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
+  if (url.pathname === "/admin/api/releases" && request.method === "GET") return json(await releaseList(env));
+  if (url.pathname === "/admin/api/releases" && request.method === "POST") {
+    const body = await readJson(request).catch(() => null);
+    const result = await saveRelease(env, body);
+    return json(result, result.error ? 400 : 200);
+  }
+  if (url.pathname === "/admin/api/report" && request.method === "GET") return json(await report(env,null));
+  const show = url.pathname.match(/^\/admin\/api\/show\/(\d+)$/);
+  if (show && request.method === "GET") {
+    const result = await reveal(env,Number(show[1]),null);
+    return json(result,result.error ? 404 : 200);
+  }
+  if (url.pathname === "/admin/api/profile" && request.method === "POST") {
+    const {uid,name} = await readJson(request);
+    if (typeof uid!=="string" || !/^[1-9]\d{0,15}$/.test(uid) || typeof name!=="string" || !name.trim() || name.trim().length>64) return errorResponse("Проверьте имя и ID");
+    await env.DB.prepare("INSERT INTO portal_names VALUES(?,?) ON CONFLICT(uid) DO UPDATE SET name=excluded.name").bind(uid,name.trim()).run();
+    return json({ok:true});
+  }
+  const edit = url.pathname.match(/^\/admin\/api\/keys\/(\d+)\/edit$/);
+  if (edit && request.method === "POST") {
+    const {hours,seats} = await readJson(request);
+    if (!Number.isSafeInteger(hours) || hours<1 || hours>876000 || !Number.isInteger(seats) || seats<1 || seats>100000) return errorResponse("Проверьте срок и число устройств");
+    const id=Number(edit[1]), life=hours*3600;
+    const result=await env.DB.prepare(`UPDATE licenses SET expires=CASE WHEN expires IS NULL THEN NULL ELSE expires+?-lifetime END,
+      lifetime=?,seats=? WHERE id=? AND ?>=(SELECT count(*) FROM devices WHERE license=? AND blocked=0)`).bind(life,life,seats,id,seats,id).run();
+    return result.meta.changes ? json({ok:true}) : errorResponse("Проверьте количество занятых мест",409);
+  }
+  if (url.pathname === "/admin/api/reseller" && request.method === "POST") return manage(request,env);
   if (url.pathname === "/admin/api/patch" && request.method === "POST") return changePatchMode(request, env);
   if (url.pathname === "/admin/api/keys" && request.method === "GET") return listKeys(env);
   if (url.pathname === "/admin/api/keys" && request.method === "POST") return createKey(request, env);
@@ -290,14 +329,23 @@ export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
+      if (["/dashboard.js","/portal.css","/releases.js"].includes(url.pathname) && request.method==="GET") return env.ASSETS.fetch(request);
+      if (url.pathname.startsWith("/reseller/api/")) return await reseller(request,env,url.pathname);
       if (url.pathname === "/api/status" && request.method === "GET") {
-        return json({ maintenance: (await patchStarted(env)) !== null });
+        const identity = releaseIdentity(
+          url.searchParams.get("app_version") ?? undefined,
+          url.searchParams.get("app_build") ?? undefined,
+        );
+        if (!identity) return errorResponse("invalid_version", 400);
+        if (await releaseBlocked(env, identity)) return json(updateNotice());
+        return json({ maintenance: (await patchStarted(env)) !== null, update_required: false });
       }
       if (url.pathname === "/api/check" && request.method === "POST") return await checkLicense(request, env);
       if (url.pathname.startsWith("/admin/api/")) return await adminApi(request, env, url);
       if (url.pathname === "/" || url.pathname === "/admin") {
         return html(await env.ASSETS.fetch(new Request(new URL("/admin.html", url))));
       }
+      if (url.pathname === "/reseller.html" || url.pathname === "/reseller") return html(await env.ASSETS.fetch(new Request(new URL("/reseller.html", url))));
       if (url.pathname === "/admin.html") return html(await env.ASSETS.fetch(request));
       return errorResponse("not_found", 404);
     } catch (error) {

@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS portal_tokens(
+ uid TEXT PRIMARY KEY, payload TEXT, removed INTEGER NOT NULL DEFAULT 0
+);

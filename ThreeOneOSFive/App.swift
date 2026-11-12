@@ -10,7 +10,6 @@ struct ThreeOneOSFiveApp: App {
     @StateObject private var patchDraftCoordinator = PatchDraftCoordinator()
     @StateObject private var fileOperationCoordinator = FileOperationCoordinator()
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
-    @State private var showAttribution = false
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -35,10 +34,6 @@ struct ThreeOneOSFiveApp: App {
                     .environmentObject(fileOperationCoordinator)
                     .environment(\.appLanguage, language)
                     .environment(\.locale, language.locale)
-                    .displayIdentityAttribution(isPresented: $showAttribution, enabled: true)
-                .sheet(isPresented: $showAttribution) {
-                    DisplayAttributionSheet()
-                }
                 .onAppear {
                     appState.detectSupport()
                 }
@@ -47,11 +42,8 @@ struct ThreeOneOSFiveApp: App {
                     appState.detectSupport()
                 }
             } else {
-                if license.maintenance {
-                    VStack(spacing: 14) {
-                        Text("Сейчас патч").font(.title.bold())
-                        Link("Напишите @osinxff", destination: URL(string: "https://t.me/osinxff")!)
-                    }
+                if license.maintenance || license.needsUpdate {
+                    ReleaseBlockedView(license: license)
                     .task {
                         while !Task.isCancelled {
                             do { try await Task.sleep(nanoseconds: 15_000_000_000) }
@@ -93,6 +85,7 @@ private final class LicenseTransport: NSObject, URLSessionTaskDelegate {
 
 @MainActor
 final class LicenseSession: ObservableObject {
+    @Published private(set) var needsUpdate = false
     @Published private(set) var maintenance = false
     @Published private(set) var allowed = false
     @Published private(set) var busy = false
@@ -146,14 +139,30 @@ final class LicenseSession: ObservableObject {
         guard !busy, !allowed else { return }
         if !activeKey.isEmpty {
             _ = await verify(activeKey)
-        } else if let base = Bundle.main.object(forInfoDictionaryKey: "LicenseServerURL") as? String,
-                  let url = URL(string: base)?.appendingPathComponent("api/status") {
+        } else {
+            guard let configured = Bundle.main.object(forInfoDictionaryKey: "LicenseServerURL") as? String,
+                  let base = URL(string: configured), base.scheme == "https", base.host != nil,
+                  var components = URLComponents(url: base.appendingPathComponent("api/status"),
+                                                 resolvingAgainstBaseURL: false) else { return }
+            components.queryItems = [
+                URLQueryItem(name: "app_version", value: VintageRelease.version),
+                URLQueryItem(name: "app_build", value: VintageRelease.build)
+            ]
+            guard let url = components.url else { return }
             let attempt = generation
-            struct Status: Decodable { let maintenance: Bool }
-            guard let (data, response) = try? await client.data(from: url),
+            busy = true
+            defer { if generation == attempt { busy = false } }
+            struct Status: Decodable {
+                let maintenance: Bool
+                let update_required: Bool?
+            }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            guard let (data, response) = try? await client.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200, generation == attempt,
                   let status = try? JSONDecoder().decode(Status.self, from: data) else { return }
             maintenance = status.maintenance
+            needsUpdate = status.update_required == true
         }
     }
 
@@ -180,17 +189,26 @@ final class LicenseSession: ObservableObject {
             request.httpMethod = "POST"
             request.timeoutInterval = 10
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(["key": key, "device": device.uuidString])
+            request.httpBody = try JSONEncoder().encode(["key": key, "device": device.uuidString,
+                                                        "app_version": VintageRelease.version,
+                                                        "app_build": VintageRelease.build])
             let (data, response) = try await client.data(for: request)
             guard generation == attempt else { return false }
-            struct Reply: Decodable { let valid: Bool?; let remaining: Int?; let error: String? }
+            struct Reply: Decodable {
+                let valid: Bool?
+                let remaining: Int?
+                let error: String?
+                let update_required: Bool?
+            }
             let reply = try JSONDecoder().decode(Reply.self, from: data)
             if (response as? HTTPURLResponse)?.statusCode == 503, reply.error == "maintenance" {
                 allowed = false
                 maintenance = true
+                needsUpdate = reply.update_required == true
                 return false
             }
             maintenance = false
+            needsUpdate = false
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   reply.valid == true, let seconds = reply.remaining, seconds > 0 else {
                 let reasons = ["expired": "Срок ключа истёк.", "full": "Все места на ключе заняты.",
@@ -230,13 +248,57 @@ final class LicenseSession: ObservableObject {
     }
 }
 
+enum VintageRelease {
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
+            ?? "1.2.0"
+    }
+
+    static var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "8"
+    }
+}
+
+private struct ReleaseBlockedView: View {
+    @ObservedObject var license: LicenseSession
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image("VintageLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 88, height: 88)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+            Text(license.needsUpdate ? "Обнови VintageLite" : "Сейчас патч")
+                .font(.title.bold())
+            Text(license.needsUpdate
+                 ? "Для этой версии включён патч. Скачай новую версию в нашем Telegram-канале."
+                 : "В приложении идут работы. Информация об обновлении — в нашем Telegram-канале.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Link("Скачать новую версию · @osinxshop",
+                 destination: URL(string: "https://t.me/osinxshop")!)
+                .buttonStyle(.borderedProminent)
+                .tint(.white)
+                .foregroundStyle(.black)
+            Button("Проверить снова") { Task { await license.resume() } }
+                .disabled(license.busy)
+            Text("Версия \(VintageRelease.version) · сборка \(VintageRelease.build)")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(28)
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+    }
+}
+
 private struct PurchaseContact: View {
     var body: some View {
         Link("По покупке ключа · @osinxff", destination: URL(string: "https://t.me/osinxff")!)
-        if let address = Bundle.main.object(forInfoDictionaryKey: "TelegramChannelURL") as? String,
-           let url = URL(string: address), url.scheme == "https", url.host == "t.me" {
-            Link("Наш Telegram-канал", destination: url)
-        }
+        Link("Telegram-канал · @osinxshop", destination: URL(string: "https://t.me/osinxshop")!)
     }
 }
 

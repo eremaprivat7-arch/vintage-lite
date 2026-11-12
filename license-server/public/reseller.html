@@ -1,0 +1,30 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vintage Lite · Реселлер</title>
+<link rel="stylesheet" href="/portal.css"><script src="/dashboard.js"></script>
+<main><header><div><div class="brand">VINTAGE LITE</div><h1>Кабинет реселлера</h1></div></header>
+<section><label>Персональный API-токен<input id="token" type="password" autocomplete="off"></label><div class="actions"><button class="primary" id="open">Открыть кабинет</button></div></section>
+<div id="reports"></div><section id="purchase" hidden><h2>Выпустить ключ</h2><p id="wallet"></p><select aria-label="Срок ключа"></select> <button class="primary" id="buy">Купить ключ</button></section><pre role="status"></pre></main><script>
+const $=s=>document.querySelector(s),result=$('pre');
+let prices={},pending;
+async function api(path,body){
+ const r=await fetch('/reseller/api/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+$('#token').value.trim(),'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+ const data=await r.json();if(!r.ok)throw Error(data.error);return data;
+}
+const render=dashboardView($('#reports'),false,path=>api(path),refresh);
+let revision=0;
+async function refresh(){
+ const version=revision;
+ const [data,report]=await Promise.all([api('account'),api('report')]);if(version!==revision)return;render(report);
+ prices=data.prices;$('#wallet').textContent='ID '+data.uid+' · Баланс '+data.balance+' ₸';
+ $('#purchase select').replaceChildren(...Object.entries(prices).map(([d,p])=>new Option(d+' дн. · '+p+' ₸',d)));$('#purchase').hidden=false;
+}
+$('#token').oninput=()=>{revision++;$('#reports').replaceChildren();$('#purchase').hidden=true;$('#wallet').textContent='';result.textContent='';pending=null};
+$('#open').onclick=()=>refresh().catch(e=>result.textContent=e.message);
+$('#buy').onclick=async()=>{
+ const days=Number($('#purchase select').value),price=prices[days];
+ if(!confirm('Купить ключ на '+days+' дн. за '+price+' ₸?'))return;
+ if(!pending || pending.days!==days || pending.price!==price)pending={order_id:crypto.randomUUID(),days,price};
+ $('#buy').disabled=true;
+ try{const r=await api('purchase',pending);pending=null;result.textContent='Твой ключ: '+r.key;await refresh().catch(()=>{});}
+ catch(e){result.textContent=e.message}finally{$('#buy').disabled=false}
+};
+</script></html>

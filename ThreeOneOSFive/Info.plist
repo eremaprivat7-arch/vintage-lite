@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>3105</string>
+    <string>VintageLite</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -13,7 +13,11 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>3105</string>
+    <string>VintageLite</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.2.0</string>
+    <key>CFBundleVersion</key>
+    <string>8</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LicenseServerURL</key>
@@ -21,7 +25,7 @@
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>AppReleaseDisplayVersion</key>
-    <string>1.1.1</string>
+    <string>1.2.0</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSPhotoLibraryUsageDescription</key>
