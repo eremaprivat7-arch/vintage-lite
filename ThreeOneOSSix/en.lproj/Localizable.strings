@@ -1239,3 +1239,6 @@
 "settings.update_latest" = "Up to date";
 "update.open_github" = "Download from GitHub";
 "update.current" = "Currently installed: %@";
+
+"vintage.private_files" = "VintageLite";
+"vintage.private_files_detail" = "Boost · Mod Skin · FPS · Holo";

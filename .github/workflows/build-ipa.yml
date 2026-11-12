@@ -1,4 +1,4 @@
-name: Build VintageLite 3106 IPA
+name: Build VintageLite Protected IPA
 on: [push, workflow_dispatch]
 permissions:
   contents: read
@@ -7,11 +7,14 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Check migration and upstream policies
         run: |
-          python3 Tests/check_vintage_migration.py
+          python3 Tests/check_private_release.py
+          node --experimental-sqlite Tests/private_content.test.mjs
           bash Tests/run_policy_tests.sh
-          bash Tests/check_bundled_packages.sh
       - name: Build for iPhone
         run: |
           xcodebuild -project ThreeOneOSSix.xcodeproj -target 3106 \
@@ -24,15 +27,16 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RUNNER_TEMP/products/3106.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$RUNNER_TEMP/products/3106.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :LicenseServerURL' "$RUNNER_TEMP/products/3106.app/Info.plist"
-          test -d "$RUNNER_TEMP/products/3106.app/Patches"
+          python3 Tests/check_private_release.py "$RUNNER_TEMP/products/3106.app"
+          xcrun strip -S -x "$RUNNER_TEMP/products/3106.app/3106"
       - name: Package IPA
         run: |
           cd "$RUNNER_TEMP"
           mkdir -p Payload
           ditto products/3106.app Payload/3106.app
-          /usr/bin/zip -qry "$GITHUB_WORKSPACE/VintageLite-3106-unsigned.ipa" Payload
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/VintageLite-Protected-2.1.0-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: VintageLite-3106-unsigned
-          path: VintageLite-3106-unsigned.ipa
+          name: VintageLite-Protected-2.1.0-unsigned
+          path: VintageLite-Protected-2.1.0-unsigned.ipa
           if-no-files-found: error

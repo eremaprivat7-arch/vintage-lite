@@ -1239,3 +1239,6 @@
 "settings.update_latest" = "已是最新版本";
 "update.open_github" = "前往 GitHub 下载";
 "update.current" = "当前安装版本：%@";
+
+"vintage.private_files" = "VintageLite";
+"vintage.private_files_detail" = "Boost · Mod Skin · FPS · Holo";

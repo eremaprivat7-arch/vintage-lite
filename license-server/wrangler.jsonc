@@ -12,8 +12,13 @@
     {
       "binding": "DB",
       "database_name": "vintage-lite-keys",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "17af1ecb-f1b5-408b-800d-2de448a1e3ba",
       "migrations_dir": "migrations"
+    },
+    {
+      "binding": "CONTENT_DB",
+      "database_name": "vintage-private-content",
+      "database_id": "322453de-f3c6-4f72-9c0c-7d4364546a7e"
     }
   ]
 }

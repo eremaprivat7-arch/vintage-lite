@@ -43,3 +43,13 @@ DerivedData/
 *.tmp
 *.swp
 *~
+/ThreeOneOSFive/Patches/
+/.vintage-private/
+/.security-backups/
+**/node_modules/
+**/.wrangler/
+__pycache__/
+*.py[cod]
+**/.dev.vars*
+*.3105
+*.3106

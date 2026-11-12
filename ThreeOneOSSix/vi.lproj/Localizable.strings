@@ -1239,3 +1239,6 @@
 "settings.update_latest" = "Đã là bản mới nhất";
 "update.open_github" = "Tải từ GitHub";
 "update.current" = "Phiên bản đang cài: %@";
+
+"vintage.private_files" = "VintageLite";
+"vintage.private_files_detail" = "Boost · Mod Skin · FPS · Holo";

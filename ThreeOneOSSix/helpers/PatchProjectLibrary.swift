@@ -74,9 +74,6 @@ enum PatchProjectLibrary {
                 }
             }
         }
-        if let resources = Bundle.main.resourceURL {
-            collect(resources.appendingPathComponent("Patches", isDirectory: true), bundled: true)
-        }
         if let root = try? packageRootURL(fileManager: fileManager) {
             collect(root, bundled: false)
         }
@@ -87,15 +84,7 @@ enum PatchProjectLibrary {
                 let data = try readPackage(at: url)
                 let summary = try PatchPackageCodec.inspect(data)
                 let decoded: DecodedPatchPackage?
-                if isBundled && summary.isPasswordProtected {
-                    if let key = try? PatchKeyStore.load(for: summary),
-                       let cached = try? PatchPackageCodec.decode(data, contentKey: key) {
-                        decoded = cached
-                    } else {
-                        decoded = try? PatchPackageCodec.decode(data, password: "@osinxshop")
-                        if let decoded { try? PatchKeyStore.store(decoded.contentKey, for: summary) }
-                    }
-                } else if let contentKey = try PatchKeyStore.load(for: summary) {
+                if let contentKey = try PatchKeyStore.load(for: summary) {
                     decoded = try PatchPackageCodec.decode(data, contentKey: contentKey)
                 } else if summary.isPasswordProtected {
                     decoded = nil

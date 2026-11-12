@@ -87,14 +87,11 @@ struct FeatureHubView: View {
 
                 Section {
                     NavigationLink {
-                        PatchProjectsView(
-                            onOpenSettings: onOpenSettings,
-                            onOpenLogs: onOpenLogs
-                        )
+                        PrivateContentView()
                     } label: {
                         card(
-                            "home.card.patches",
-                            detail: "home.card.patches_detail",
+                            "vintage.private_files",
+                            detail: "vintage.private_files_detail",
                             icon: "square.stack.3d.up.fill"
                         )
                     }

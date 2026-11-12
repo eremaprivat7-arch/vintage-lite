@@ -17,7 +17,7 @@ struct ThreeOneOSSixApp: App {
     init() {
         setupLogCapture()
         SandboxAccess.prepare()
-        log("app: VintageLite 2.0.0 (3106 base) launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
+        log("app: VintageLite 2.1.0 (protected delivery) launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
     }
 
     private var language: AppLanguage {
@@ -160,6 +160,7 @@ final class LicenseSession: ObservableObject {
     private let client = URLSession(configuration: .ephemeral, delegate: LicenseTransport(), delegateQueue: nil)
 
     func suspend() {
+        Task { await PrivateContentClient.shared.clear() }
         generation = UUID()
         timer?.cancel()
         busy = false
@@ -195,6 +196,11 @@ final class LicenseSession: ObservableObject {
             maintenance = status.maintenance
             needsUpdate = status.update_required == true
         }
+    }
+
+    func contentCredentials() throws -> PrivateContentCredentials {
+        guard allowed, !activeKey.isEmpty else { throw PrivateContentError(code: "license_denied") }
+        return PrivateContentCredentials(key: activeKey, device: try deviceIdentifier())
     }
 
     func checkForApply() async -> Bool {
@@ -283,11 +289,11 @@ enum VintageRelease {
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
-            ?? "2.0.0"
+            ?? "2.1.0"
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "9"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "10"
     }
 }
 

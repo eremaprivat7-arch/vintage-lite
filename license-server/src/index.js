@@ -1,3 +1,4 @@
+import {privateContent,manageContent,boundedJSON,limitAdminLogin} from "./private-content.js";
 import { releaseIdentity, releaseBlocked, releaseList, saveRelease, updateNotice } from "./releases.js";
 import {report,reveal,issuedKey} from "./dashboard.js";
 import {manage,reseller} from './reseller.js';
@@ -34,15 +35,7 @@ function errorResponse(error, status = 400) {
 }
 
 async function readJson(request, maxBytes = 4096) {
-  const raw = await request.text();
-  if (raw.length > maxBytes) throw new Error("too_large");
-  try {
-    const value = JSON.parse(raw);
-    if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("bad_json");
-    return value;
-  } catch {
-    throw new Error("bad_json");
-  }
+  return (await boundedJSON(request, maxBytes)).value;
 }
 
 function hex(bytes) {
@@ -203,6 +196,8 @@ async function adminLogin(request, env) {
     return errorResponse("server_setup", 503);
   }
   if (!sameOrigin(request)) return errorResponse("forbidden", 403);
+  try { await limitAdminLogin(request,env); }
+  catch { return errorResponse("rate_limited",429); }
   let body;
   try { body = await readJson(request); }
   catch { return errorResponse("invalid", 400); }
@@ -266,6 +261,7 @@ async function adminApi(request, env, url) {
 
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
+  if (url.pathname.startsWith("/admin/api/content/")) return manageContent(request,env,url);
   if (url.pathname === "/admin/api/releases" && request.method === "GET") return json(await releaseList(env));
   if (url.pathname === "/admin/api/releases" && request.method === "POST") {
     const body = await readJson(request).catch(() => null);
@@ -340,6 +336,7 @@ export default {
         if (await releaseBlocked(env, identity)) return json(updateNotice());
         return json({ maintenance: (await patchStarted(env)) !== null, update_required: false });
       }
+      if (url.pathname.startsWith("/api/content/")) return await privateContent(request,env,url);
       if (url.pathname === "/api/check" && request.method === "POST") return await checkLicense(request, env);
       if (url.pathname.startsWith("/admin/api/")) return await adminApi(request, env, url);
       if (url.pathname === "/" || url.pathname === "/admin") {

@@ -7,7 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-        F37A0001 /* Patches in Resources */ = {isa = PBXBuildFile; fileRef = F37A0002; };
+        3106F200 /* PrivateContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3106F100; };
+        3106F201 /* PrivateContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3106F101; };
 		3105A200 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105A020; };
 		3105A201 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105A021; };
 		3105A203 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105A023; };
@@ -124,7 +125,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-        F37A0002 /* Patches */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "../ThreeOneOSFive/Patches"; sourceTree = "<group>"; };
+        3106F100 /* PrivateContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateContentClient.swift; sourceTree = "<group>"; };
+        3106F101 /* PrivateContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateContentView.swift; sourceTree = "<group>"; };
 		3105A010 /* 3106.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "3106.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3105A020 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		3105A021 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -293,7 +295,6 @@
 				3106W032 /* ThreeOneOSSix.entitlements */,
 				3105A120 /* Localizable.strings */,
 				3105A031 /* Assets.xcassets */,
-                F37A0002 /* Patches */,
 			);
 			path = ThreeOneOSSix;
 			sourceTree = "<group>";
@@ -326,6 +327,7 @@
 			children = (
 				3105A098 /* DesignSystem.swift */,
 				3105A023 /* SettingsView.swift */,
+                3106F101 /* PrivateContentView.swift */,
 				3105A024 /* LogView.swift */,
 				3105A105 /* AppDataBrowserView.swift */,
 				3105A112 /* FileBrowserView.swift */,
@@ -369,6 +371,7 @@
 			children = (
 				3105A099 /* Localization.swift */,
 				3105A104 /* ContainerStore.swift */,
+                3106F100 /* PrivateContentClient.swift */,
 				3105A108 /* ContainerIdentityResolver.swift */,
 				3105A109 /* ContainerBrowserLogic.swift */,
 				3106Q100 /* LaunchServicesStore.swift */,
@@ -513,7 +516,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				3105A211,
-                F37A0001,
 				3105A228,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -525,6 +527,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                3106F200,
+                3106F201,
 				3105A200, 3105A201, 3105A203, 3105A204,
 				3105A205, 3105A206, 3105A207, 3105A209,
 				3106W200,
@@ -651,7 +655,7 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_ENTITLEMENTS = "ThreeOneOSSix/ThreeOneOSSix.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -667,7 +671,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.1.0;
 				OTHER_LDFLAGS = "-lz";
 				PRODUCT_BUNDLE_IDENTIFIER = com.apple.mobile.MobileHouseArrest;
 				PRODUCT_NAME = 3106;
@@ -685,7 +689,7 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_ENTITLEMENTS = "ThreeOneOSSix/ThreeOneOSSix.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -701,7 +705,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.1.0;
 				OTHER_LDFLAGS = "-lz";
 				PRODUCT_BUNDLE_IDENTIFIER = com.apple.mobile.MobileHouseArrest;
 				PRODUCT_NAME = 3106;
@@ -745,7 +749,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
+				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -807,7 +811,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
+				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -825,6 +829,9 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
+                DEAD_CODE_STRIPPING = YES;
+                STRIP_INSTALLED_PRODUCT = YES;
+                STRIP_STYLE = non-global;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
