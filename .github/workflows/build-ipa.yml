@@ -1,4 +1,4 @@
-name: Build Vintage Lite IPA
+name: Build VintageLite 3106 IPA
 on: [push, workflow_dispatch]
 permissions:
   contents: read
@@ -7,20 +7,32 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+      - name: Check migration and upstream policies
+        run: |
+          python3 Tests/check_vintage_migration.py
+          bash Tests/run_policy_tests.sh
+          bash Tests/check_bundled_packages.sh
       - name: Build for iPhone
         run: |
-          xcodebuild -project ThreeOneOSFive.xcodeproj -target 3105 \
+          xcodebuild -project ThreeOneOSSix.xcodeproj -target 3106 \
             -configuration Release -sdk iphoneos ARCHS=arm64 \
             CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/products" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Check built license configuration
+        run: |
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$RUNNER_TEMP/products/3106.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RUNNER_TEMP/products/3106.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$RUNNER_TEMP/products/3106.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :LicenseServerURL' "$RUNNER_TEMP/products/3106.app/Info.plist"
+          test -d "$RUNNER_TEMP/products/3106.app/Patches"
       - name: Package IPA
         run: |
           cd "$RUNNER_TEMP"
           mkdir -p Payload
-          ditto products/3105.app Payload/3105.app
-          /usr/bin/zip -qry "$GITHUB_WORKSPACE/Vintage-Lite-unsigned.ipa" Payload
+          ditto products/3106.app Payload/3106.app
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/VintageLite-3106-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: Vintage-Lite-unsigned
-          path: Vintage-Lite-unsigned.ipa
+          name: VintageLite-3106-unsigned
+          path: VintageLite-3106-unsigned.ipa
           if-no-files-found: error

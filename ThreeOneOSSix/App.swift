@@ -1,0 +1,575 @@
+import SwiftUI
+import Security
+import UIKit
+import Foundation
+
+@main
+struct ThreeOneOSSixApp: App {
+    @StateObject private var license = LicenseSession()
+    @StateObject private var appState = AppState()
+    @StateObject private var patchDraftCoordinator = PatchDraftCoordinator()
+    @StateObject private var fileOperationCoordinator = FileOperationCoordinator()
+    @StateObject private var patchStore = PatchProjectStore()
+    @StateObject private var repositoryStore = PackageRepositoryStore()
+    @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        setupLogCapture()
+        SandboxAccess.prepare()
+        log("app: VintageLite 2.0.0 (3106 base) launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
+    }
+
+    private var language: AppLanguage {
+        AppLanguage(rawValue: languageCode) ?? .english
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            Group {
+            if license.allowed {
+                ContentView()
+                    .preferredColorScheme(.dark)
+                    .tint(.white)
+                    .environmentObject(license)
+                    .environmentObject(appState)
+                    .environmentObject(patchDraftCoordinator)
+                    .environmentObject(fileOperationCoordinator)
+                    .environmentObject(patchStore)
+                    .environmentObject(repositoryStore)
+                    .environment(\.appLanguage, language)
+                    .environment(\.locale, language.locale)
+                .onAppear {
+                    appState.detectSupport()
+                }
+                .onChange(of: scenePhase) { phase in
+                    guard phase == .active else { return }
+                    appState.detectSupport()
+                }
+            } else {
+                if license.maintenance || license.needsUpdate {
+                    ReleaseBlockedView(license: license)
+                    .task {
+                        while !Task.isCancelled {
+                            do { try await Task.sleep(nanoseconds: 15_000_000_000) }
+                            catch { return }
+                            await license.resume()
+                        }
+                    }
+                } else if license.hasSavedKey {
+                    VStack(spacing: 16) {
+                        if license.busy || license.message.isEmpty {
+                            ProgressView("Проверяем доступ…")
+                        } else {
+                            Text(license.message)
+                            Button("Повторить проверку") { Task { await license.resume() } }
+                        }
+                    }
+                } else {
+                    AccessKeyView(license: license)
+                }
+            }
+            }
+            .onOpenURL { url in
+                patchDraftCoordinator.presentImport(url)
+            }
+            .task { await license.resume() }
+            .onChange(of: scenePhase) { phase in
+                if phase == .background { license.suspend() }
+                if phase == .active { Task { await license.resume() } }
+            }
+        }
+    }
+}
+
+private final class LicenseTransport: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+@MainActor
+final class LicenseSession: ObservableObject {
+    @Published private(set) var needsUpdate = false
+    @Published private(set) var maintenance = false
+    @Published private(set) var allowed = false
+    @Published private(set) var busy = false
+    @Published private(set) var message = ""
+    private static let item: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "VintageLite.activation",
+        kSecAttrAccount as String: "license"
+    ]
+    @Published private(set) var hasSavedKey = false
+    @Published private(set) var expiresAt: Date?
+    private(set) var activeKey = ""
+
+    init() {
+        var query = Self.item
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty {
+            activeKey = key
+            hasSavedKey = true
+        }
+    }
+
+    private func remember(_ key: String) throws {
+        if hasSavedKey && activeKey == key { return }
+        let attributes: [String: Any] = [
+            kSecValueData as String: Data(key.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        var status = SecItemUpdate(Self.item as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let item = Self.item.merging(attributes) { _, value in value }
+            status = SecItemAdd(item as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw LicenseFailure("Не удалось сохранить ключ на iPhone.") }
+        hasSavedKey = true
+    }
+    private func deviceIdentifier() throws -> String {
+        var item = Self.item
+        item[kSecAttrAccount as String] = "device-id"
+        var query = item
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess, let data = result as? Data,
+           let value = String(data: data, encoding: .utf8), UUID(uuidString: value) != nil {
+            return value
+        }
+        guard status == errSecItemNotFound, let identifier = UIDevice.current.identifierForVendor else {
+            throw LicenseFailure("Не удалось прочитать ID этого устройства.")
+        }
+        let value = identifier.uuidString
+        item[kSecValueData as String] = Data(value.utf8)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else {
+            throw LicenseFailure("Не удалось сохранить ID этого устройства.")
+        }
+        return value
+    }
+
+    private var generation = UUID()
+    private var timer: Task<Void, Never>?
+    private let client = URLSession(configuration: .ephemeral, delegate: LicenseTransport(), delegateQueue: nil)
+
+    func suspend() {
+        generation = UUID()
+        timer?.cancel()
+        busy = false
+        allowed = false
+    }
+
+    func resume() async {
+        guard !busy, !allowed else { return }
+        if !activeKey.isEmpty {
+            _ = await verify(activeKey)
+        } else {
+            guard let configured = Bundle.main.object(forInfoDictionaryKey: "LicenseServerURL") as? String,
+                  let base = URL(string: configured), base.scheme == "https", base.host != nil,
+                  var components = URLComponents(url: base.appendingPathComponent("api/status"),
+                                                 resolvingAgainstBaseURL: false) else { return }
+            components.queryItems = [
+                URLQueryItem(name: "app_version", value: VintageRelease.version),
+                URLQueryItem(name: "app_build", value: VintageRelease.build)
+            ]
+            guard let url = components.url else { return }
+            let attempt = generation
+            busy = true
+            defer { if generation == attempt { busy = false } }
+            struct Status: Decodable {
+                let maintenance: Bool
+                let update_required: Bool?
+            }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            guard let (data, response) = try? await client.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200, generation == attempt,
+                  let status = try? JSONDecoder().decode(Status.self, from: data) else { return }
+            maintenance = status.maintenance
+            needsUpdate = status.update_required == true
+        }
+    }
+
+    func checkForApply() async -> Bool {
+        guard allowed, !activeKey.isEmpty else { return false }
+        return await verify(activeKey)
+    }
+
+    func verify(_ supplied: String) async -> Bool {
+        let attempt = UUID()
+        generation = attempt
+        timer?.cancel()
+        busy = true
+        message = ""
+        let key = supplied.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { if generation == attempt { busy = false } }
+        do {
+            guard let configured = Bundle.main.object(forInfoDictionaryKey: "LicenseServerURL") as? String,
+                  let base = URL(string: configured), base.scheme == "https", base.host != nil else {
+                throw LicenseFailure("Сервер ключей не настроен.")
+            }
+            let device = try deviceIdentifier()
+            var request = URLRequest(url: base.appendingPathComponent("api/check"))
+            request.httpMethod = "POST"
+            request.timeoutInterval = 10
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(["key": key, "device": device,
+                                                        "app_version": VintageRelease.version,
+                                                        "app_build": VintageRelease.build])
+            let (data, response) = try await client.data(for: request)
+            guard generation == attempt else { return false }
+            struct Reply: Decodable {
+                let valid: Bool?
+                let remaining: Int?
+                let error: String?
+                let update_required: Bool?
+            }
+            let reply = try JSONDecoder().decode(Reply.self, from: data)
+            if (response as? HTTPURLResponse)?.statusCode == 503, reply.error == "maintenance" {
+                allowed = false
+                maintenance = true
+                needsUpdate = reply.update_required == true
+                return false
+            }
+            maintenance = false
+            needsUpdate = false
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  reply.valid == true, let seconds = reply.remaining, seconds > 0 else {
+                let reasons = ["expired": "Срок ключа истёк.", "full": "Все места на ключе заняты.",
+                               "blocked": "Это устройство отключено.", "invalid": "Ключ неверный или отозван."]
+                if (response as? HTTPURLResponse)?.statusCode == 403,
+                   reasons[reply.error ?? ""] != nil {
+                    SecItemDelete(Self.item as CFDictionary)
+                    hasSavedKey = false
+                    activeKey = ""
+                }
+                throw LicenseFailure(reasons[reply.error ?? ""] ?? "Сервер не подтвердил доступ.")
+            }
+            try remember(key)
+            activeKey = key
+            expiresAt = Date().addingTimeInterval(TimeInterval(seconds))
+            allowed = true
+            timer = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: UInt64(min(seconds, 30)) * 1_000_000_000) }
+                catch { return }
+                guard let self, self.generation == attempt else { return }
+                if seconds <= 30 { self.allowed = false }
+                // A separate task lets verify cancel the previous timer without cancelling the request.
+                Task { _ = await self.verify(key) }
+            }
+            return true
+        } catch {
+            guard generation == attempt else { return false }
+            allowed = false
+            message = (error as? LicenseFailure)?.text ?? "Не удалось проверить ключ. Проверь подключение."
+            return false
+        }
+    }
+
+    private struct LicenseFailure: Error {
+        let text: String
+        init(_ text: String) { self.text = text }
+    }
+}
+
+enum VintageRelease {
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
+            ?? "2.0.0"
+    }
+
+    static var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "9"
+    }
+}
+
+private struct ReleaseBlockedView: View {
+    @ObservedObject var license: LicenseSession
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image("VintageLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 88, height: 88)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+            Text(license.needsUpdate ? "Обнови VintageLite" : "Сейчас патч")
+                .font(.title.bold())
+            Text(license.needsUpdate
+                 ? "Для этой версии включён патч. Скачай новую версию в нашем Telegram-канале."
+                 : "В приложении идут работы. Информация об обновлении — в нашем Telegram-канале.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Link("Скачать новую версию · @osinxshop",
+                 destination: URL(string: "https://t.me/osinxshop")!)
+                .buttonStyle(.borderedProminent)
+                .tint(.white)
+                .foregroundStyle(.black)
+            Button("Проверить снова") { Task { await license.resume() } }
+                .disabled(license.busy)
+            Text("Версия \(VintageRelease.version) · сборка \(VintageRelease.build)")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(28)
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct PurchaseContact: View {
+    var body: some View {
+        Link("По покупке ключа · @osinxff", destination: URL(string: "https://t.me/osinxff")!)
+        Link("Telegram-канал · @osinxshop", destination: URL(string: "https://t.me/osinxshop")!)
+    }
+}
+
+struct LicenseAccountView: View {
+    @EnvironmentObject private var license: LicenseSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+    private let mint = Color(red: 0.40, green: 0.91, blue: 0.74)
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text("VINTAGE LITE").font(.title.bold())
+                        Spacer()
+                        Image(systemName: "bolt.fill").font(.title)
+                    }
+                    .foregroundStyle(.black).padding(22)
+                    .background(mint, in: RoundedRectangle(cornerRadius: 20))
+
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let end = license.expiresAt {
+                            TimelineView(.periodic(from: .now, by: 1)) { tick in
+                                let seconds = max(0, Int(ceil(end.timeIntervalSince(tick.date))))
+                                VStack(alignment: .leading, spacing: 14) {
+                                    Label(seconds > 0 ? "Ключ активен" : "Срок истёк",
+                                          systemImage: "clock").font(.subheadline.bold())
+                                    Text(String(format: "%d д %02d:%02d:%02d", seconds / 86400,
+                                                seconds / 3600 % 24, seconds / 60 % 60, seconds % 60))
+                                        .font(.system(size: 38, weight: .bold, design: .rounded))
+                                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                                }.foregroundStyle(mint)
+                            }
+                            Divider()
+                            Text("Действует до").foregroundStyle(.secondary)
+                            Text(end.formatted(date: .long, time: .shortened))
+                        } else {
+                            Text("Уточняем срок ключа…")
+                        }
+                        Divider()
+                        Text("Ключ на этом устройстве").foregroundStyle(.secondary)
+                        Text("•••• " + String(license.activeKey.suffix(4))).monospaced()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Бонус за ключ").font(.headline)
+                        Text("Скопируй ключ и отправь его боту в личном чате.")
+                            .foregroundStyle(.secondary)
+                        Button(copied ? "Ключ скопирован" : "Скопировать ключ") {
+                            UIPasteboard.general.string = license.activeKey
+                            copied = true
+                        }
+                        Link("Получить бонус", destination: URL(string: "https://t.me/vintagelite_bot")!)
+                        Divider()
+                        PurchaseContact()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+                }.frame(maxWidth: 560).padding().frame(maxWidth: .infinity)
+            }
+            .navigationTitle("Аккаунт")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Готово") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct AccessKeyView: View {
+    @ObservedObject var license: LicenseSession
+    @State private var key = ""
+
+
+    @State private var revealKey = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 26) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 42, weight: .black))
+                        .frame(width: 82, height: 82)
+                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 24))
+                        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.2)))
+                        .accessibilityHidden(true)
+                    VStack(spacing: 8) {
+                        Text("VINTAGE LITE").font(.largeTitle.weight(.black)).tracking(2)
+                        Text("КЛЮЧ ДОСТУПА").font(.caption.weight(.bold)).tracking(3)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Group {
+                            if revealKey { TextField("Введи ключ", text: $key) }
+                            else { SecureField("Введи ключ", text: $key) }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit(validate)
+                        Button { revealKey.toggle() } label: {
+                            Image(systemName: revealKey ? "eye.slash" : "eye").frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel(revealKey ? "Скрыть ключ" : "Показать ключ")
+                    }
+                    .padding(.leading, 16).padding(.trailing, 4).padding(.vertical, 4)
+                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.18)))
+                    if !license.message.isEmpty { Text(license.message).foregroundStyle(.red) }
+                    Button(action: validate) {
+                        Text(license.busy ? "ПРОВЕРЯЕМ…" : "АКТИВИРОВАТЬ").font(.headline.weight(.heavy)).tracking(1.5)
+                            .frame(maxWidth: .infinity).padding(.vertical, 17)
+                            .foregroundStyle(.black).background(.white, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                }
+                .disabled(license.busy)
+                .padding(28).frame(maxWidth: 480)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+        }
+        .background(Color.black.ignoresSafeArea())
+        .preferredColorScheme(.dark).tint(.white)
+    }
+
+    private func validate() {
+        guard !license.busy else { return }
+        Task { _ = await license.verify(key) }
+    }
+}
+
+class AppState: ObservableObject {
+    @Published var exploitStatus: ExploitStatus = .notStarted
+    @Published var unsupportedMessage: String?
+    @Published var kernelExploitRunning = false
+
+    private var autoRunAttempted = false
+
+    var kernelExploitApplicable: Bool {
+        KernelExploit.isApplicable(
+            major: AppInfo.versionTuple.major,
+            minor: AppInfo.versionTuple.minor,
+            patch: AppInfo.versionTuple.patch,
+            build: AppInfo.osBuild
+        )
+    }
+
+    var isSupported: Bool { unsupportedMessage == nil }
+
+    func detectSupport() {
+        let v = AppInfo.versionTuple
+        let supported = ExploitSupportPolicy.isSupported(
+            major: v.major,
+            minor: v.minor,
+            patch: v.patch,
+            build: AppInfo.osBuild
+        )
+#if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("--simulate-access") {
+            exploitStatus = .success(method: "Simulator preview")
+        }
+#endif
+
+        unsupportedMessage = supported ? nil : "iOS \(AppInfo.osVersion) (\(AppInfo.osBuild))"
+        if let unsupportedMessage {
+            exploitStatus = .unsupported(unsupportedMessage)
+            return
+        }
+
+        let applicable = KernelExploit.isApplicable(
+            major: v.major,
+            minor: v.minor,
+            patch: v.patch,
+            build: AppInfo.osBuild
+        )
+        guard applicable else { return }
+
+        refreshKernelExploitStatus()
+        maybeAutoRunKernelExploit()
+    }
+
+    private func maybeAutoRunKernelExploit() {
+        guard !kernelExploitRunning,
+              !exploitStatus.isSuccess,
+              !exploitStatus.isFailed,
+              !autoRunAttempted else { return }
+        autoRunAttempted = true
+        log("app: starting kernel exploit automatically")
+        runKernelExploitIfNeeded()
+    }
+
+    private func refreshKernelExploitStatus() {
+        guard !kernelExploitRunning else { return }
+
+        // iOS < 26: kernel R/W success persists (no sandbox probe)
+        // iOS >= 26: verify full sandbox escape is still active
+        if KernelExploit.requiresSandboxEscape {
+            if KernelExploit.hasSandboxAccess() {
+                if !exploitStatus.isSuccess {
+                    exploitStatus = .success(method: SandboxAccess.backend.displayName)
+                    log("app: existing \(SandboxAccess.backend.displayName) access is still active")
+                }
+            } else if exploitStatus.isSuccess {
+                exploitStatus = .notStarted
+                log("app: sandbox access is no longer active")
+            }
+        }
+    }
+
+    func runKernelExploitIfNeeded() {
+        refreshKernelExploitStatus()
+        guard !kernelExploitRunning,
+              !exploitStatus.isSuccess,
+              !exploitStatus.isFailed else { return }
+        kernelExploitRunning = true
+        exploitStatus = .notStarted
+        let backend = SandboxAccess.backend
+        log("app: running \(backend.displayName) access setup on background...")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = KernelExploit.run()
+            DispatchQueue.main.async {
+                self.kernelExploitRunning = false
+                if ok {
+                    self.exploitStatus = .success(method: backend.displayName)
+                    if backend == .kernel {
+                        log("app: kernel access active")
+                    } else {
+                        log("app: \(backend.displayName) access active")
+                    }
+                } else {
+                    self.exploitStatus = .failed(method: backend.displayName, code: -1)
+                    if backend == .worseQuery && !SandboxAccess.hasAppGroup {
+                        log("app: worse_query needs an App Group; re-sign with a tool that provides one")
+                    } else {
+                        log("app: \(backend.displayName) setup failed — relaunch the app before retrying")
+                    }
+                }
+            }
+        }
+    }
+}
