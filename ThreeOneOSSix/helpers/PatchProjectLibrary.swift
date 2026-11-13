@@ -1,5 +1,29 @@
 import Foundation
 
+enum VintageCategory: String, CaseIterable {
+    case boost = "Boost"
+    case skin = "Mod Skin"
+    case fps = "FPS"
+    case holo = "Holo"
+
+    var folderName: String {
+        switch self {
+        case .boost: return "FPSBoost"
+        case .skin: return "ModSkin"
+        case .fps, .holo: return rawValue
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .boost: return "bolt.fill"
+        case .skin: return "tshirt.fill"
+        case .fps: return "speedometer"
+        case .holo: return "cube"
+        }
+    }
+}
+
 struct PatchLibraryItem: Identifiable {
     let summary: PatchPackageSummary
     var project: PatchProject?
@@ -8,6 +32,11 @@ struct PatchLibraryItem: Identifiable {
     let isBundled: Bool
     let isAuthorCopy: Bool
     let origin: PatchPackageOrigin?
+
+    var vintageCategory: VintageCategory {
+        let folder = packageURL.deletingLastPathComponent().lastPathComponent
+        return VintageCategory.allCases.first { $0.folderName == folder } ?? .boost
+    }
 
     var id: UUID { summary.packageID }
     var isLocked: Bool { project == nil }
@@ -61,8 +90,8 @@ enum PatchProjectLibrary {
     static func load(fileManager: FileManager = .default) -> [PatchLibraryItem] {
         var sources: [(url: URL, bundled: Bool)] = []
         func collect(_ root: URL, bundled: Bool) {
-            let folders = [root] + ["FPSBoost", "ModSkin", "FPS", "Holo"].map {
-                root.appendingPathComponent($0, isDirectory: true)
+            let folders = [root] + VintageCategory.allCases.map {
+                root.appendingPathComponent($0.folderName, isDirectory: true)
             }
             for folder in folders {
                 let urls = (try? fileManager.contentsOfDirectory(
@@ -148,13 +177,18 @@ enum PatchProjectLibrary {
         data: Data,
         projectName: String,
         existingURL: URL? = nil,
+        category: VintageCategory? = nil,
         fileManager: FileManager = .default
     ) throws -> URL {
         let destination: URL
         if let existingURL {
             destination = existingURL
         } else {
-            let root = try packageRootURL(fileManager: fileManager)
+            var root = try packageRootURL(fileManager: fileManager)
+            if let category {
+                root = root.appendingPathComponent(category.folderName, isDirectory: true)
+                try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+            }
             let baseName = sanitizedFilename(projectName)
             var candidate = root.appendingPathComponent(baseName).appendingPathExtension("3106")
             var suffix = 2

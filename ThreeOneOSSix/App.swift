@@ -10,7 +10,6 @@ struct ThreeOneOSSixApp: App {
     @StateObject private var patchDraftCoordinator = PatchDraftCoordinator()
     @StateObject private var fileOperationCoordinator = FileOperationCoordinator()
     @StateObject private var patchStore = PatchProjectStore()
-    @StateObject private var repositoryStore = PackageRepositoryStore()
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
@@ -36,7 +35,6 @@ struct ThreeOneOSSixApp: App {
                     .environmentObject(patchDraftCoordinator)
                     .environmentObject(fileOperationCoordinator)
                     .environmentObject(patchStore)
-                    .environmentObject(repositoryStore)
                     .environment(\.appLanguage, language)
                     .environment(\.locale, language.locale)
                 .onAppear {
@@ -341,7 +339,6 @@ private struct PurchaseContact: View {
 
 struct LicenseAccountView: View {
     @EnvironmentObject private var license: LicenseSession
-    @Environment(\.dismiss) private var dismiss
     @State private var copied = false
     private let mint = Color(red: 0.40, green: 0.91, blue: 0.74)
 
@@ -400,11 +397,6 @@ struct LicenseAccountView: View {
                 }.frame(maxWidth: 560).padding().frame(maxWidth: .infinity)
             }
             .navigationTitle("Аккаунт")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Готово") { dismiss() }
-                }
-            }
         }
     }
 }

@@ -55,7 +55,7 @@ final class PatchProjectStore: ObservableObject {
         isBusy = false
     }
 
-    func create(project: PatchProject, password: String?) {
+    func create(project: PatchProject, password: String?, category: VintageCategory? = nil) {
         runOperation(successMessageKey: "patch.created_message") {
             let encoded = try PatchPackageCodec.encodeNew(project: project, password: password)
             let summary = try PatchPackageCodec.inspect(encoded.data)
@@ -67,7 +67,8 @@ final class PatchProjectStore: ObservableObject {
                 }
                 savedURL = try PatchProjectLibrary.save(
                     data: encoded.data,
-                    projectName: project.name
+                    projectName: project.name,
+                    category: category
                 )
                 try PatchProjectLibrary.markAsAuthorCopy(packageID: project.id)
             } catch {
