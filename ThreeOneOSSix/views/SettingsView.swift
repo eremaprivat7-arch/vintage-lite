@@ -5,20 +5,17 @@ struct SettingsView: View {
     @Environment(\.appLanguage) private var language
     @EnvironmentObject private var appState: AppState
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
-    // Mirrors SoundEffects.isEnabled so the effect player reads one source of
-    // truth (UserDefaults) while the toggle gets @AppStorage semantics.
-    @AppStorage("sound.effects.enabled") private var soundEffectsEnabled = true
-    // Gates high-risk experimental flows (Siri AI experimental mode) behind
-    // an explicit opt-in; the flows stay hidden until this is on.
-    @AppStorage(FeatureVisibility.developerModeStorageKey) private var experimentalFeaturesEnabled = false
-    @State private var showAccount = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        AppLogo()
+                        Image("VintageLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 11))
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text("VintageLite").font(.headline)
@@ -28,12 +25,6 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                }
-
-                Section("Аккаунт VintageLite") {
-                    Button { showAccount = true } label: {
-                        Label("Ключ, срок и бонус", systemImage: "person.crop.circle")
-                    }
                 }
 
                 Section(language.text("settings.language")) {
@@ -46,85 +37,9 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
 
-                Section {
-                    NavigationLink {
-                        BackupCenterView()
-                    } label: {
-                        Label(
-                            language.text("backup.title"),
-                            systemImage: "externaldrive.badge.timemachine"
-                        )
-                    }
-
-                    NavigationLink {
-                        AcknowledgementsView()
-                    } label: {
-                        Label(
-                            language.text("ack.title"),
-                            systemImage: "heart.text.square.fill"
-                        )
-                    }
-
-                    RespringButton()
-                } header: {
-                    Text(language.text("settings.backup"))
-                }
-
-                Section {
-                    Toggle(isOn: $soundEffectsEnabled) {
-                        Label(
-                            language.text("settings.sound_effects"),
-                            systemImage: "speaker.wave.2"
-                        )
-                    }
-                } header: {
-                    Text(language.text("settings.sound_effects"))
-                } footer: {
-                    Text(language.text("settings.sound_effects_footer"))
-                }
-
-                Section("Обновления VintageLite") {
-                    Link("Новая версия · @osinxshop",
-                         destination: URL(string: "https://t.me/osinxshop")!)
-                }
-
-                Section {
-                    Toggle(isOn: $experimentalFeaturesEnabled) {
-                        Label(
-                            language.text("settings.experimental"),
-                            systemImage: "flask"
-                        )
-                    }
-                } header: {
-                    Text(language.text("settings.experimental_header"))
-                } footer: {
-                    Text(language.text("settings.experimental_footer"))
-                }
-
-                if WallpaperFeatureSupportPolicy.isSupported(
-                    major: AppInfo.versionTuple.major
-                ) {
-                    Section {
-                        NavigationLink {
-                            WallpaperResetSettingsView()
-                        } label: {
-                            Label(
-                                language.text("wallpaper.reset"),
-                                systemImage: "arrow.counterclockwise"
-                            )
-                        }
-                    } header: {
-                        Text(language.text("tab.wallpapers"))
-                    } footer: {
-                        Text(language.text("wallpaper.reset_settings_footer"))
-                    }
-                }
-
                 Section(language.text("common.device")) {
                     LabeledContent(language.text("dashboard.hardware_model"), value: AppInfo.displayMachineName)
                     LabeledContent(language.text("settings.ios_version"), value: "\(AppInfo.osVersion) (\(AppInfo.osBuild))")
-                    LabeledContent(language.text("settings.access_backend"), value: SandboxAccess.backend.displayName)
-                    LabeledContent(language.text("settings.app_group"), value: appGroupStatus)
                 }
 
                 Section {
@@ -148,13 +63,12 @@ struct SettingsView: View {
                 }
 
                 Section("Социальные сети") {
-                    Link("Telegram-канал · @osinxshop",
-                         destination: URL(string: "https://t.me/osinxshop")!)
-                    Link("Поддержка · @osinxff",
-                         destination: URL(string: "https://t.me/osinxff")!)
+                    creditsRow(name: "@osinxshop", role: "Telegram-канал · обновления",
+                               url: "https://t.me/osinxshop")
+                    creditsRow(name: "@osinxff", role: "Поддержка и покупка ключа",
+                               url: "https://t.me/osinxff")
                 }
             }
-            .sheet(isPresented: $showAccount) { LicenseAccountView() }
             .tint(AppTheme.accent)
             .navigationTitle(language.text("settings.title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -167,9 +81,28 @@ struct SettingsView: View {
         }
     }
 
-    private var appGroupStatus: String {
-        guard SandboxAccess.needsWorseQuery else { return "—" }
-        return SandboxAccess.appGroup ?? language.text("settings.app_group_missing")
+    @ViewBuilder
+    private func creditsRow(name: String, role: String, url: String) -> some View {
+        if let destination = URL(string: url) {
+            Link(destination: destination) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(role)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 28, height: 28)
+                }
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel(language.text("accessibility.open_profile", name))
+        }
     }
-
-    }
+}

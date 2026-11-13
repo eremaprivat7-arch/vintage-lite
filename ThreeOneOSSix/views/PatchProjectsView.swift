@@ -656,7 +656,7 @@ extension View {
     }
 }
 
-private struct PatchProjectDetailView: View {
+struct PatchProjectDetailView: View {
     @EnvironmentObject private var license: LicenseSession
     @Environment(\.appLanguage) private var language
     @ObservedObject var store: PatchProjectStore
@@ -666,11 +666,9 @@ private struct PatchProjectDetailView: View {
     @State private var showApplyConfirmation = false
     @State private var showRestoreConfirmation = false
     @State private var showChangedRestoreConfirmation = false
-    @State private var showResetConfirmation = false
     @State private var restoreChangedPaths: [String] = []
     @State private var isWorking = false
     @State private var actionAlert: PatchStoreAlert?
-    @State private var shareRequest: PatchShareRequest?
 
     private var item: PatchLibraryItem? {
         store.items.first(where: { $0.id == projectID })
@@ -687,32 +685,6 @@ private struct PatchProjectDetailView: View {
     var body: some View {
         List {
             if let item, let project = item.project {
-                Section(language.text("patch.information")) {
-                    if !project.author.isEmpty {
-                        patchInfoRow(
-                            label: language.text("patch.author"),
-                            value: project.author
-                        )
-                    }
-                    patchInfoRow(label: language.text("patch.privacy")) {
-                        Label(
-                            language.text(project.isPrivate
-                                ? "patch.private"
-                                : "patch.public"),
-                            systemImage: project.isPrivate
-                                ? "eye.slash.fill"
-                                : "eye"
-                        )
-                        .foregroundStyle(project.isPrivate ? AppTheme.accent : Color.secondary)
-                    }
-                    if let origin = item.origin {
-                        patchInfoRow(
-                            label: language.text("repository.source"),
-                            value: origin.repositoryName
-                        )
-                    }
-                }
-
                 if project.isPrivate && !item.canInspectContents {
                     Section {
                         VStack(spacing: 10) {
@@ -765,7 +737,7 @@ private struct PatchProjectDetailView: View {
                     } footer: {
                         Text(language.text("patch.workspace_detail_footer"))
                     }
-                } else {
+                } else if item.canInspectContents {
                     Section {
                         ForEach(project.rules) { rule in
                             Button {
@@ -806,18 +778,14 @@ private struct PatchProjectDetailView: View {
                     Button {
                         showApplyConfirmation = true
                     } label: {
-                        actionLabel("patch.apply", systemImage: "checkmark.shield.fill")
+                        actionLabel("patch.apply", systemImage: "bolt.fill")
+                            .font(.headline.weight(.bold)).foregroundStyle(.black)
+                            .padding(.horizontal, 16).padding(.vertical, 14)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 14))
                     }
                     .disabled(isWorking || receipt != nil)
 
                     if receipt != nil {
-                        Button {
-                            showResetConfirmation = true
-                        } label: {
-                            actionLabel("patch.reset", systemImage: "arrow.counterclockwise.circle")
-                        }
-                        .disabled(isWorking)
-
                         Button(role: .destructive) {
                             showRestoreConfirmation = true
                         } label: {
@@ -826,12 +794,6 @@ private struct PatchProjectDetailView: View {
                         .disabled(isWorking)
                     }
 
-                    if !item.isBundled {
-                        Button(action: prepareExport) {
-                            actionLabel("patch.export", systemImage: "square.and.arrow.up")
-                        }
-                        .disabled(isWorking)
-                    }
                 } footer: {
                     Text(language.text("patch.apply_footer"))
                 }
@@ -897,16 +859,6 @@ private struct PatchProjectDetailView: View {
         } message: {
             Text(changedRestoreMessage)
         }
-        .confirmationDialog(
-            language.text("patch.reset_confirm_title"),
-            isPresented: $showResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(language.text("patch.reset"), role: .destructive) { resetToAppliedState() }
-            Button(language.text("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(language.text("patch.reset_confirm_message"))
-        }
         .alert(item: $actionAlert) { alert in
             Alert(
                 title: Text(language.text(alert.titleKey)),
@@ -914,41 +866,11 @@ private struct PatchProjectDetailView: View {
                 dismissButton: .default(Text(language.text("common.ok")))
             )
         }
-        .sheet(item: $shareRequest) { request in
-            PatchActivityView(items: [request.url])
-                .ignoresSafeArea()
-        }
     }
 
     private func actionLabel(_ key: String, systemImage: String) -> some View {
         Label(language.text(key), systemImage: systemImage)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func patchInfoRow(
-        label: String,
-        value: String
-    ) -> some View {
-        patchInfoRow(label: label) {
-            Text(value)
-                .foregroundStyle(.primary)
-        }
-    }
-
-    private func patchInfoRow<Content: View>(
-        label: String,
-        @ViewBuilder value: () -> Content
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 16)
-            value()
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.subheadline)
-        .padding(.vertical, 5)
     }
 
     private func ruleSummary(_ rule: PatchRule) -> some View {
@@ -1024,40 +946,6 @@ private struct PatchProjectDetailView: View {
                         isWorking = false
                         actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.apply")
                     }
-                }
-            }
-        }
-    }
-
-    private func prepareExport() {
-        guard let item else { return }
-        isWorking = true
-        Task.detached(priority: .userInitiated) {
-            do {
-                if item.summary.schemaVersion >= 2, item.canInspectContents {
-                    _ = try PatchProjectLibrary.synchronizeWorkspace(item: item)
-                }
-                await MainActor.run {
-                    store.reload()
-                    isWorking = false
-                    shareRequest = PatchShareRequest(url: item.packageURL)
-                }
-            } catch let error as PatchPackageError {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: privateErrorKey(for: error),
-                        messageArgument: privateErrorArgument(for: error)
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: "patch.error.invalid_project"
-                    )
                 }
             }
         }
@@ -1155,43 +1043,6 @@ private struct PatchProjectDetailView: View {
         }
     }
 
-    private func resetToAppliedState() {
-        guard let receipt, let project = item?.project else { return }
-        isWorking = true
-        Task.detached(priority: .userInitiated) {
-            do {
-                try DevicePatchService.resetToAppliedState(
-                    receipt: receipt,
-                    project: project
-                )
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.done",
-                        messageKey: "patch.reset_message"
-                    )
-                }
-            } catch let error as PatchPackageError {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: privateErrorKey(for: error),
-                        messageArgument: privateErrorArgument(for: error)
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: "patch.error.reset"
-                    )
-                }
-            }
-        }
-    }
-
     private func privateErrorKey(for error: PatchPackageError) -> String {
         guard item?.project?.isPrivate == true,
               item?.isAuthorCopy == false else {
@@ -1207,22 +1058,4 @@ private struct PatchProjectDetailView: View {
         }
         return nil
     }
-}
-
-private struct PatchShareRequest: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
-private struct PatchActivityView: UIViewControllerRepresentable {
-    let items: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(
-        _ uiViewController: UIActivityViewController,
-        context: Context
-    ) {}
 }
