@@ -191,6 +191,8 @@ enum PatchPackageError: Error, Equatable {
     case resetFailed
     case invalidImportLink
     case remoteImportFailed
+    case missingAppGroup
+    case accessUnavailable
 }
 
 extension PatchPackageError: LocalizedError {
@@ -218,6 +220,8 @@ extension PatchPackageError: LocalizedError {
         case .resetFailed: return "patch.error.reset"
         case .invalidImportLink: return "patch.error.invalid_import_link"
         case .remoteImportFailed: return "patch.error.remote_import"
+        case .missingAppGroup: return "appgroup.message"
+        case .accessUnavailable: return "patch.error.access_unavailable"
         }
     }
 

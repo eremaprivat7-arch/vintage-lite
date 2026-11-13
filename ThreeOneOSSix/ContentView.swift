@@ -80,7 +80,7 @@ struct ContentView: View {
                     .accessibilityAddTraits(tab == selection ? .isSelected : [])
                 }
             }
-            .navigationTitle("3105")
+            .navigationTitle("VintageLite")
             .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
         } detail: {
             tabContent(selection)
@@ -132,6 +132,7 @@ private struct DashboardView: View {
             List {
                 deviceSection
             }
+            .navigationTitle("VintageLite")
             .navigationBarTitleDisplayMode(.inline)
             .tint(AppTheme.accent)
             .toolbar {

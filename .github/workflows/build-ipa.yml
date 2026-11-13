@@ -1,42 +1,137 @@
-name: Build VintageLite Protected IPA
-on: [push, workflow_dispatch]
+name: VintageLite Full Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the IPA in GitHub Releases'
+        type: boolean
+        default: true
+        required: true
+
 permissions:
   contents: read
+
 jobs:
   build:
     runs-on: macos-15-intel
+    timeout-minutes: 35
+    outputs:
+      tag: ${{ steps.package.outputs.tag }}
+      filename: ${{ steps.package.outputs.filename }}
+      package_count: ${{ steps.package.outputs.package_count }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check migration and upstream policies
+      - name: Check the complete app and bundled packages
         run: |
           python3 Tests/check_private_release.py
+          bash Tests/check_bundled_packages.sh
           node --experimental-sqlite Tests/private_content.test.mjs
           bash Tests/run_policy_tests.sh
-      - name: Build for iPhone
+
+      - name: Build VintageLite for iPhone
         run: |
           xcodebuild -project ThreeOneOSSix.xcodeproj -target 3106 \
             -configuration Release -sdk iphoneos ARCHS=arm64 \
             CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/products" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-      - name: Check built license configuration
+
+      - name: Package and verify the IPA
+        id: package
         run: |
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$RUNNER_TEMP/products/3106.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RUNNER_TEMP/products/3106.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$RUNNER_TEMP/products/3106.app/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Print :LicenseServerURL' "$RUNNER_TEMP/products/3106.app/Info.plist"
-          python3 Tests/check_private_release.py "$RUNNER_TEMP/products/3106.app"
-          xcrun strip -S -x "$RUNNER_TEMP/products/3106.app/3106"
-      - name: Package IPA
-        run: |
-          cd "$RUNNER_TEMP"
-          mkdir -p Payload
-          ditto products/3106.app Payload/3106.app
-          /usr/bin/zip -qry "$GITHUB_WORKSPACE/VintageLite-Protected-2.1.0-unsigned.ipa" Payload
+          set -euo pipefail
+          app="$RUNNER_TEMP/products/3106.app"
+          python3 Tests/check_private_release.py "$app"
+          plist="$app/Info.plist"
+          read_info() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          test "$(read_info CFBundleDisplayName)" = VintageLite
+          test -x "$app/$(read_info CFBundleExecutable)"
+          test -s "$app/Assets.car"
+          version="$(read_info CFBundleShortVersionString)"
+          build="$(read_info CFBundleVersion)"
+          tag="v$version"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "The tag must match the built app ($tag)." >&2
+            exit 1
+          fi
+          name="VintageLite-$version-unsigned.ipa"
+          package_count="$(python3 -c 'from pathlib import Path; import sys; print(sum(1 for p in Path(sys.argv[1]).rglob("*") if p.is_file() and p.suffix.lower() in (".3105", ".3106")))' "$app/Patches")"
+          printf 'tag=%s\nfilename=%s\npackage_count=%s\n' "$tag" "$name" "$package_count" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload" "$RUNNER_TEMP/publish"
+          ditto "$app" "$RUNNER_TEMP/ipa/Payload/3106.app"
+          cd "$RUNNER_TEMP/ipa"
+          /usr/bin/zip -q -r "$RUNNER_TEMP/publish/$name" Payload
+          cd "$RUNNER_TEMP/publish"
+          unzip -tq "$name"
+          shasum -a 256 "$name" > "$name.sha256"
+          printf 'VintageLite %s (%s)\n' "$version" "$build" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: VintageLite-Protected-2.1.0-unsigned
-          path: VintageLite-Protected-2.1.0-unsigned.ipa
+          name: VintageLite-IPA
+          path: ${{ runner.temp }}/publish/
           if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' || inputs.publish
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: publish-vintagelite-${{ needs.build.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: VintageLite-IPA
+          path: release-assets
+      - name: Publish verified files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          IPA_NAME: ${{ needs.build.outputs.filename }}
+          PACKAGE_COUNT: ${{ needs.build.outputs.package_count }}
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          sha256sum -c "$IPA_NAME.sha256"
+          actual="$(git rev-parse HEAD)"
+          existing="$(git rev-parse --verify --quiet "refs/tags/$TAG^{commit}" || true)"
+          if [[ -n "$existing" && "$existing" != "$actual" ]]; then
+            echo "Tag $TAG already belongs to $existing. Increment the app version." >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+            draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+            if [[ -z "$existing" ]]; then
+              draft_target="$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)"
+              if [[ "$draft" != true || "$draft_target" != "$actual" ]]; then
+                echo "Could not verify the existing release commit." >&2
+                exit 1
+              fi
+            fi
+            if [[ "$draft" == false ]]; then
+              checkdir="$(mktemp -d)"
+              gh release download "$TAG" --dir "$checkdir" --pattern "$IPA_NAME*"
+              (cd "$checkdir" && sha256sum -c "$IPA_NAME.sha256")
+              exit 0
+            fi
+            gh release upload "$TAG" "$IPA_NAME" "$IPA_NAME.sha256" --clobber
+          else
+            gh release create "$TAG" --draft --target "$actual" --title "VintageLite ${TAG#v}" \
+              --notes "VintageLite для iPhone. Полный интерфейс Home / Patches / Аккаунт, Apply Patch, восстановление оригиналов, вход по ключу и $PACKAGE_COUNT встроенных патчей. Для установки подпишите IPA профилем с возможностями исходного проекта." \
+              "$IPA_NAME" "$IPA_NAME.sha256"
+          fi
+          gh release edit "$TAG" --draft=false

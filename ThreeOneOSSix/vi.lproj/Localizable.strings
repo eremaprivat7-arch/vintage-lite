@@ -1242,3 +1242,18 @@
 
 "vintage.private_files" = "VintageLite";
 "vintage.private_files_detail" = "Boost · Mod Skin · FPS · Holo";
+
+"patch.progress.license" = "Đang kiểm tra giấy phép…";
+"patch.progress.workspace" = "Đang chuẩn bị bản vá…";
+"patch.progress.resolve" = "Đang tìm ứng dụng đích…";
+"patch.progress.validate" = "Đang kiểm tra tệp đích…";
+"patch.progress.backup" = "Đang sao lưu tệp gốc…";
+"patch.progress.write" = "Đang ghi tệp %lld/%lld…";
+"patch.progress.finish" = "Đang lưu kết quả…";
+"patch.progress.restore" = "Đang khôi phục tệp gốc…";
+"patch.progress.elapsed" = "Đã chạy %@";
+"patch.error.access_unavailable" = "Không thể truy cập dữ liệu thiết bị. Mở Home để kiểm tra khả năng tương thích và chữ ký.";
+"patch.error.license_check" = "Kiểm tra giấy phép hoặc bảo trì đã chặn thao tác. Kiểm tra kết nối và màn hình Tài khoản.";
+"patch.error.target_access" = "Không thể mở ứng dụng đích. Kiểm tra ứng dụng đã được cài và chữ ký cho phép truy cập thiết bị.";
+"patch.status.applied" = "Đã áp dụng bản vá";
+"patch.error.target_busy" = "Một bản vá khác đang sử dụng các tệp này. Khôi phục tệp gốc của bản vá đó trước khi áp dụng.";

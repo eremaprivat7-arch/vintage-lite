@@ -8,6 +8,17 @@ struct PatchTransactionReceipt: Equatable, Identifiable {
     let journalURL: URL
 }
 
+enum PatchApplyProgress: Sendable {
+    case checkingLicense
+    case preparingWorkspace
+    case resolvingApp
+    case checkingFiles
+    case backingUp
+    case writingFile(current: Int, total: Int)
+    case finishing
+    case restoring
+}
+
 enum PatchTargetChangeKind: Equatable {
     case modified
     case missing
@@ -102,8 +113,10 @@ enum PatchTransaction {
         containerResolver: (String) throws -> URL,
         beforeWrite: ((Int) throws -> Void)? = nil,
         fileManager: FileManager = .default,
-        backupCenter: BackupCenter? = nil
+        backupCenter: BackupCenter? = nil,
+        progress: ((PatchApplyProgress) -> Void)? = nil
     ) throws -> PatchTransactionReceipt {
+        progress?(.checkingFiles)
         guard !project.rules.isEmpty || !project.directories.isEmpty else {
             throw PatchPackageError.invalidProject
         }
@@ -215,6 +228,7 @@ enum PatchTransaction {
         }
 
         var records: [Record] = []
+        progress?(.backingUp)
         let createdDirectories = resolvedDirectories.compactMap { resolved -> DirectoryRecord? in
             guard !fileManager.fileExists(atPath: resolved.target.path) else { return nil }
             return DirectoryRecord(
@@ -297,6 +311,7 @@ enum PatchTransaction {
                 )
             }
             for (index, resolved) in resolvedRules.enumerated() {
+                progress?(.writingFile(current: index + 1, total: resolvedRules.count))
                 try beforeWrite?(index)
                 let parentGrant = ContainerStore.grantContainerAccess(
                     resolved.target.deletingLastPathComponent().path
@@ -324,6 +339,7 @@ enum PatchTransaction {
                     throw PatchPackageError.applyFailed
                 }
             }
+            progress?(.finishing)
             journal.status = .applied
             try writeJournal(journal, to: journalURL)
             return PatchTransactionReceipt(

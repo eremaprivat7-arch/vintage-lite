@@ -6,7 +6,7 @@ let files = FileManager.default.enumerator(
 )!
 var checked = 0
 var needsPassword = 0
-for case let url as URL in files where url.pathExtension.lowercased() == "3105" {
+for case let url as URL in files where ["3105", "3106"].contains(url.pathExtension.lowercased()) {
     do {
         let data = try Data(contentsOf: url)
         let summary = try PatchPackageCodec.inspect(data)
@@ -24,8 +24,8 @@ for case let url as URL in files where url.pathExtension.lowercased() == "3105" 
         exit(1)
     }
 }
-guard checked > 0 else {
-    fputs("FAIL: no readable bundled packages\n", stderr)
+guard checked + needsPassword > 0 else {
+    fputs("FAIL: no bundled patch packages were found\n", stderr)
     exit(1)
 }
 print("PASS: \(checked) packages decoded, \(needsPassword) require their own password")

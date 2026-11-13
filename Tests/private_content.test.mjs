@@ -103,6 +103,19 @@ assert.equal((await call(await request('/api/content/package',{id:asset},lease.t
 base.exec("DELETE FROM app_releases WHERE version='2.1.0'");
 assert.equal(snapshot(),original,'existing licenses, bindings, expiry and balances unchanged');
 const rawEnv={...env,DB:binding(base),ADMIN_PASSWORD:'only-for-tests',SESSION_SECRET:'test-secret-that-is-longer-than-thirty-two-characters'};
+const statusFor=async(version,build)=>worker.fetch(
+  new Request('https://example.test/api/status?'+new URLSearchParams({app_version:version,app_build:build})),rawEnv);
+base.prepare('INSERT INTO app_releases(version,build,blocked) VALUES(?,?,1)').run('2.2.4','15');
+assert.equal((await (await statusFor('2.2.4','15')).json()).update_required,true,'new release enters its patch mode');
+assert.notEqual((await (await statusFor('2.2.3','14')).json()).update_required,true,'the release block leaves older versions enabled');
+const newReleaseCheck=await worker.fetch(new Request('https://example.test/api/check',{
+  method:'POST',body:JSON.stringify({key:rawKey,device,app_version:'2.2.4',app_build:'15'})}),rawEnv);
+assert.equal(newReleaseCheck.status,503,'patch mode blocks key checks for the new build');
+base.prepare('DELETE FROM app_releases WHERE version=? AND build=?').run('2.2.4','15');
+base.exec('UPDATE patch_mode SET started=unixepoch() WHERE id=1');
+assert.equal((await (await statusFor('2.2.4','15')).json()).maintenance,true,'global patch mode also covers the new build');
+base.exec('UPDATE patch_mode SET started=NULL WHERE id=1');
+assert.notEqual((await (await statusFor('2.2.4','15')).json()).maintenance,true,'the new build resumes when patch mode ends');
 const unauth=new Request('https://example.test/admin/api/content/status');
 assert.equal((await worker.fetch(unauth,rawEnv)).status,401,'owner uploads are not public');
 const oldCheck=await worker.fetch(new Request('https://example.test/api/check',{method:'POST',body:JSON.stringify({key:rawKey,device,app_version:'2.0.0',app_build:'9'})}),rawEnv);

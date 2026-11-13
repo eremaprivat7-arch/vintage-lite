@@ -1,7 +1,12 @@
 import Foundation
 
 enum DevicePatchService {
-    static func apply(project: PatchProject) throws -> PatchTransactionReceipt {
+    static func apply(
+        project: PatchProject,
+        progress: ((PatchApplyProgress) -> Void)? = nil
+    ) throws -> PatchTransactionReceipt {
+        try validateAccess()
+        progress?(.resolvingApp)
         let bundleIDs = orderedBundleIdentifiers(in: project)
         return try withResolvedContainers(bundleIDs: bundleIDs) { roots in
             try PatchTransaction.apply(
@@ -13,8 +18,22 @@ enum DevicePatchService {
                     }
                     return root
                 },
-                backupCenter: .shared
+                backupCenter: .shared,
+                progress: progress
             )
+        }
+    }
+
+    static func validateAccess() throws {
+        switch SandboxAccess.backend {
+        case .worseQuery where !SandboxAccess.hasAppGroup:
+            throw PatchPackageError.missingAppGroup
+        case .unsupported:
+            throw PatchPackageError.accessUnavailable
+        case .kernel where !KernelExploit.hasKernelSandboxAccess():
+            throw PatchPackageError.accessUnavailable
+        default:
+            break
         }
     }
 

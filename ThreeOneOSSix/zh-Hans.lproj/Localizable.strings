@@ -1242,3 +1242,18 @@
 
 "vintage.private_files" = "VintageLite";
 "vintage.private_files_detail" = "Boost · Mod Skin · FPS · Holo";
+
+"patch.progress.license" = "正在验证许可证…";
+"patch.progress.workspace" = "正在准备所选补丁…";
+"patch.progress.resolve" = "正在查找目标应用…";
+"patch.progress.validate" = "正在检查目标文件…";
+"patch.progress.backup" = "正在备份原始文件…";
+"patch.progress.write" = "正在写入第 %lld/%lld 个文件…";
+"patch.progress.finish" = "正在保存结果…";
+"patch.progress.restore" = "正在恢复原始文件…";
+"patch.progress.elapsed" = "已用时 %@";
+"patch.error.access_unavailable" = "无法访问设备数据。请在主页检查兼容性和签名。";
+"patch.error.license_check" = "许可证或维护状态未允许此操作。请检查网络连接和账户页面。";
+"patch.error.target_access" = "无法打开目标应用。请确认应用已安装，且当前签名允许设备数据访问。";
+"patch.status.applied" = "补丁已应用";
+"patch.error.target_busy" = "其他补丁正在使用这些文件。请先恢复该补丁的原始文件，再应用当前补丁。";

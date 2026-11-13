@@ -668,6 +668,9 @@ struct PatchProjectDetailView: View {
     @State private var showChangedRestoreConfirmation = false
     @State private var restoreChangedPaths: [String] = []
     @State private var isWorking = false
+    @State private var applyProgress: PatchApplyProgress = .checkingLicense
+    @State private var operationStarted = Date()
+    @State private var progressID: UUID?
     @State private var actionAlert: PatchStoreAlert?
 
     private var item: PatchLibraryItem? {
@@ -685,7 +688,7 @@ struct PatchProjectDetailView: View {
     var body: some View {
         List {
             if let item, let project = item.project {
-                if project.isPrivate && !item.canInspectContents {
+                if project.isPrivate && !item.canInspectContents && !item.isBundled {
                     Section {
                         VStack(spacing: 10) {
                             Image(systemName: "lock.shield.fill")
@@ -778,7 +781,8 @@ struct PatchProjectDetailView: View {
                     Button {
                         showApplyConfirmation = true
                     } label: {
-                        actionLabel("patch.apply", systemImage: "bolt.fill")
+                        actionLabel(receipt == nil ? "patch.apply" : "patch.status.applied",
+                                    systemImage: "bolt.fill")
                             .font(.headline.weight(.bold)).foregroundStyle(.black)
                             .padding(.horizontal, 16).padding(.vertical, 14)
                             .background(.white, in: RoundedRectangle(cornerRadius: 14))
@@ -792,6 +796,17 @@ struct PatchProjectDetailView: View {
                             actionLabel("patch.restore", systemImage: "arrow.uturn.backward.circle")
                         }
                         .disabled(isWorking)
+                    }
+
+                    if isWorking {
+                        ProgressView(progressText)
+                        TimelineView(.periodic(from: operationStarted, by: 1)) { context in
+                            let seconds = max(0, Int(context.date.timeIntervalSince(operationStarted)))
+                            Text(language.text("patch.progress.elapsed",
+                                               String(format: "%02d:%02d", seconds / 60, seconds % 60)))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                 } footer: {
@@ -913,40 +928,83 @@ struct PatchProjectDetailView: View {
         }
     }
 
+    private var progressText: String {
+        switch applyProgress {
+        case .checkingLicense: return language.text("patch.progress.license")
+        case .preparingWorkspace: return language.text("patch.progress.workspace")
+        case .resolvingApp: return language.text("patch.progress.resolve")
+        case .checkingFiles: return language.text("patch.progress.validate")
+        case .backingUp: return language.text("patch.progress.backup")
+        case .writingFile(let current, let total):
+            return language.text("patch.progress.write", Int64(current), Int64(total))
+        case .finishing: return language.text("patch.progress.finish")
+        case .restoring: return language.text("patch.progress.restore")
+        }
+    }
+
+    @MainActor
     private func apply() {
-        guard let item, let baseProject = item.project else { return }
+        guard !isWorking, let item, let baseProject = item.project else { return }
+        do {
+            try DevicePatchService.validateAccess()
+        } catch let error as PatchPackageError {
+            actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: error.localizationKey)
+            return
+        } catch {
+            actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.access_unavailable")
+            return
+        }
+
+        let attempt = UUID()
+        progressID = attempt
         isWorking = true
+        operationStarted = Date()
+        applyProgress = .checkingLicense
+        log("patch: apply started id=\(projectID) backend=\(SandboxAccess.backend.displayName)")
+
         Task {
-            guard await license.checkForApply() else {
+            defer {
+                progressID = nil
                 isWorking = false
+            }
+            guard await license.checkForApply() else {
+                log("patch: apply stopped by license or maintenance check")
+                actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.license_check")
                 return
             }
-            Task.detached(priority: .userInitiated) {
-                do {
+
+            let report: @Sendable (PatchApplyProgress) -> Void = { stage in
+                log("patch: apply stage \(stage)")
+                Task { @MainActor in
+                    guard progressID == attempt else { return }
+                    applyProgress = stage
+                }
+            }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    report(.preparingWorkspace)
                     let project = item.summary.schemaVersion >= 2 && item.canInspectContents
                         ? try PatchProjectLibrary.synchronizeWorkspace(item: item)
                         : baseProject
-                    _ = try DevicePatchService.apply(project: project)
-                    await MainActor.run {
-                        store.reload()
-                        isWorking = false
-                        actionAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.applied_message")
-                    }
-                } catch let error as PatchPackageError {
-                    await MainActor.run {
-                        isWorking = false
-                        actionAlert = PatchStoreAlert(
-                            titleKey: "common.failed",
-                            messageKey: privateErrorKey(for: error),
-                            messageArgument: privateErrorArgument(for: error)
-                        )
-                    }
-                } catch {
-                    await MainActor.run {
-                        isWorking = false
-                        actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.apply")
-                    }
+                    _ = try DevicePatchService.apply(project: project, progress: report)
+                }.value
+
+                // Only an editable workspace changes the package on disk.
+                if item.summary.schemaVersion >= 2 && item.canInspectContents {
+                    store.reload()
                 }
+                log("patch: apply completed in \(Int(Date().timeIntervalSince(operationStarted))) seconds")
+                actionAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.applied_message")
+            } catch let error as PatchPackageError {
+                log("patch: apply failed \(error)")
+                actionAlert = PatchStoreAlert(
+                    titleKey: "common.failed",
+                    messageKey: privateErrorKey(for: error),
+                    messageArgument: privateErrorArgument(for: error)
+                )
+            } catch {
+                log("patch: apply failed \(error.localizedDescription)")
+                actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.apply")
             }
         }
     }
@@ -972,6 +1030,8 @@ struct PatchProjectDetailView: View {
     private func prepareRestore() {
         guard let receipt else { return }
         isWorking = true
+        operationStarted = Date()
+        applyProgress = .restoring
         Task.detached(priority: .userInitiated) {
             do {
                 let inspection = try DevicePatchService.inspectRestore(receipt: receipt)
@@ -1015,6 +1075,8 @@ struct PatchProjectDetailView: View {
     private func restore(allowChangedTargets: Bool) {
         guard let receipt else { return }
         isWorking = true
+        operationStarted = Date()
+        applyProgress = .restoring
         Task.detached(priority: .userInitiated) {
             do {
                 try DevicePatchService.restore(
@@ -1044,6 +1106,18 @@ struct PatchProjectDetailView: View {
     }
 
     private func privateErrorKey(for error: PatchPackageError) -> String {
+        if error == .missingAppGroup || error == .accessUnavailable {
+            return error.localizationKey
+        }
+        if case .targetAppUnavailable = error {
+            return "patch.error.target_access"
+        }
+        if case .targetOccupied = error {
+            return "patch.error.target_busy"
+        }
+        if error == .projectAlreadyApplied {
+            return error.localizationKey
+        }
         guard item?.project?.isPrivate == true,
               item?.isAuthorCopy == false else {
             return error.localizationKey

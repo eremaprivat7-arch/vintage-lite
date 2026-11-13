@@ -43,7 +43,6 @@ DerivedData/
 *.tmp
 *.swp
 *~
-/ThreeOneOSFive/Patches/
 /.vintage-private/
 /.security-backups/
 **/node_modules/
@@ -53,3 +52,4 @@ __pycache__/
 **/.dev.vars*
 *.3105
 *.3106
+!/ThreeOneOSFive/Patches/**/*.3105

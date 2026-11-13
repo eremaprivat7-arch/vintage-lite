@@ -16,7 +16,7 @@ struct ThreeOneOSSixApp: App {
     init() {
         setupLogCapture()
         SandboxAccess.prepare()
-        log("app: VintageLite 2.1.0 (protected delivery) launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
+        log("app: VintageLite 2.2.4 launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
     }
 
     private var language: AppLanguage {
@@ -155,7 +155,13 @@ final class LicenseSession: ObservableObject {
 
     private var generation = UUID()
     private var timer: Task<Void, Never>?
-    private let client = URLSession(configuration: .ephemeral, delegate: LicenseTransport(), delegateQueue: nil)
+    private let client: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 15
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration, delegate: LicenseTransport(), delegateQueue: nil)
+    }()
 
     func suspend() {
         Task { await PrivateContentClient.shared.clear() }
@@ -287,11 +293,11 @@ enum VintageRelease {
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
-            ?? "2.1.0"
+            ?? "2.2.4"
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "10"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "15"
     }
 }
 
@@ -369,7 +375,8 @@ struct LicenseAccountView: View {
                             }
                             Divider()
                             Text("Действует до").foregroundStyle(.secondary)
-                            Text(end.formatted(date: .long, time: .shortened))
+                            Text(end.formatted(.dateTime.locale(Locale(identifier: "ru_RU"))
+                                .day().month(.wide).year().hour().minute()))
                         } else {
                             Text("Уточняем срок ключа…")
                         }

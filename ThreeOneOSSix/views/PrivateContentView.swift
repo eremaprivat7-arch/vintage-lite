@@ -20,7 +20,10 @@ struct PrivateContentView: View {
     }
 
     private var remoteItems: [PrivateContentAsset] {
-        assets.filter { $0.category == category.rawValue }
+        let localIDs = Set(store.items.map { $0.id.uuidString.lowercased() })
+        return assets.filter {
+            $0.category == category.rawValue && !localIDs.contains($0.package_id.lowercased())
+        }
     }
 
     private var localItems: [PatchLibraryItem] {
@@ -61,7 +64,7 @@ struct PrivateContentView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.black)
 
-            if !message.isEmpty {
+            if !message.isEmpty && (hasCatalog || store.items.isEmpty) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message).font(.subheadline).foregroundStyle(.secondary)
                     if !hasCatalog {
@@ -83,22 +86,23 @@ struct PrivateContentView: View {
 
             ForEach(matchingLocal) { item in
                 localRow(item)
+                    .deleteDisabled(item.isBundled)
                     .listRowBackground(cardBackground)
                     .listRowSeparator(.hidden)
             }
             .onDelete { offsets in
                 let items = matchingLocal
-                for index in offsets { store.delete(items[index]) }
+                for index in offsets where !items[index].isBundled { store.delete(items[index]) }
             }
 
             if matchingRemote.isEmpty && matchingLocal.isEmpty {
-                if busy || store.isBusy || (!hasCatalog && message.isEmpty) {
+                if busy || store.isBusy {
                     ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                         .listRowSeparator(.hidden)
                 } else if !localItems.isEmpty || !remoteItems.isEmpty {
                     emptyRow(language.text("patch.search_empty"), icon: "magnifyingglass")
                         .listRowSeparator(.hidden)
-                } else if hasCatalog {
+                } else {
                     emptyRow("В разделе \(category.rawValue) пока нет файлов", icon: "shippingbox")
                         .listRowSeparator(.hidden)
                 }
@@ -290,6 +294,13 @@ struct PrivateContentView: View {
             }
         } catch PatchPackageError.projectAlreadyApplied {
             message = "Этот файл уже применён. Для повторного применения сначала восстанови оригинал."
-        } catch { message = (error as? PrivateContentError)?.localizedDescription ?? "Не удалось применить изменение. Проверь доступ к приложению и выбранный файл." }
+        } catch PatchPackageError.missingAppGroup {
+            message = language.text("appgroup.message")
+        } catch PatchPackageError.accessUnavailable {
+            message = language.text("patch.error.access_unavailable")
+        } catch {
+            message = (error as? PrivateContentError)?.localizedDescription
+                ?? "Не удалось применить изменение. Проверь доступ к приложению и выбранный файл."
+        }
     }
 }

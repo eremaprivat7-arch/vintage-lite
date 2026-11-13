@@ -1242,3 +1242,18 @@
 
 "vintage.private_files" = "VintageLite";
 "vintage.private_files_detail" = "Boost · Mod Skin · FPS · Holo";
+
+"patch.progress.license" = "Checking the license…";
+"patch.progress.workspace" = "Preparing the selected patch…";
+"patch.progress.resolve" = "Finding the target app…";
+"patch.progress.validate" = "Checking target files…";
+"patch.progress.backup" = "Backing up original files…";
+"patch.progress.write" = "Writing file %lld of %lld…";
+"patch.progress.finish" = "Saving the result…";
+"patch.progress.restore" = "Restoring original files…";
+"patch.progress.elapsed" = "Elapsed %@";
+"patch.error.access_unavailable" = "Device access is unavailable. Open Home and check compatibility and signing.";
+"patch.error.license_check" = "The license or maintenance check did not allow this operation. Check the connection and the Account screen.";
+"patch.error.target_access" = "The target app could not be opened. Check that it is installed and that this signature permits device access.";
+"patch.status.applied" = "Patch applied";
+"patch.error.target_busy" = "Another patch is active for these files. Restore its originals before applying this patch.";
