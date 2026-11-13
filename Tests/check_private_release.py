@@ -14,14 +14,15 @@ project = (ROOT / "ThreeOneOSSix.xcodeproj/project.pbxproj").read_text()
 assert info["CFBundleIdentifier"] == "com.apple.mobile.MobileHouseArrest"
 assert info["CFBundleDisplayName"] == "VintageLite"
 assert info["LicenseServerURL"] == "https://vintage-lite-license.vintage-lite-keys.workers.dev"
-assert info["CFBundleShortVersionString"] == "2.2.4"
-assert info["CFBundleVersion"] == "15"
+assert info["RemotePatchCatalogEnabled"] is False
+assert info["CFBundleShortVersionString"] == "2.2.5"
+assert info["CFBundleVersion"] == "16"
 assert info["UIFileSharingEnabled"] is False
 assert info["LSSupportsOpeningDocumentsInPlace"] is False
 assert 'path = "../ThreeOneOSFive/Patches"' in project
 assert "F37A0001 /* Patches in Resources */" in project
-assert "MARKETING_VERSION = 2.2.4;" in project
-assert "CURRENT_PROJECT_VERSION = 15;" in project
+assert "MARKETING_VERSION = 2.2.5;" in project
+assert "CURRENT_PROJECT_VERSION = 16;" in project
 assert project.count("INFOPLIST_KEY_CFBundleDisplayName = VintageLite;") == 2
 entitlements = plistlib.loads((APP / "ThreeOneOSSix.entitlements").read_bytes())
 assert entitlements["com.apple.security.application-groups"]
@@ -72,6 +73,7 @@ if len(sys.argv) > 1:
     for key in ("CFBundleIdentifier", "CFBundleDisplayName", "CFBundleShortVersionString", "CFBundleVersion"):
         assert built[key] == info[key], key
     assert not built.get("UIFileSharingEnabled", False)
+    assert built.get("RemotePatchCatalogEnabled") is False
     built_resources = bundle / "Patches"
     built_hashes = {
         file.relative_to(built_resources): sha256(file.read_bytes()).digest()

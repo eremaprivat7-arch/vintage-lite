@@ -19,7 +19,12 @@ struct PrivateContentView: View {
         search.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var remoteCatalogEnabled: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "RemotePatchCatalogEnabled") as? Bool ?? true
+    }
+
     private var remoteItems: [PrivateContentAsset] {
+        guard remoteCatalogEnabled else { return [] }
         let localIDs = Set(store.items.map { $0.id.uuidString.lowercased() })
         return assets.filter {
             $0.category == category.rawValue && !localIDs.contains($0.package_id.lowercased())
@@ -263,6 +268,12 @@ struct PrivateContentView: View {
     }
 
     @MainActor private func refresh() async {
+        guard remoteCatalogEnabled else {
+            assets = []
+            hasCatalog = true
+            message = ""
+            return
+        }
         guard !busy else { return }
         busy = true
         defer { busy = false }
