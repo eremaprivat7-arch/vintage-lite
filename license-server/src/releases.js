@@ -14,11 +14,25 @@ export async function releaseBlocked(env, identity) {
   return row?.blocked === 1;
 }
 
+export async function recordRelease(env, identity) {
+  if (identity.version === "legacy") return;
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO app_releases (version, build) VALUES (?, ?)",
+  ).bind(identity.version, identity.build).run();
+}
+
 export async function releaseList(env) {
   const rows = await env.DB.prepare(
     "SELECT version, build, blocked FROM app_releases ORDER BY version, build",
   ).all();
-  return { releases: rows.results || [] };
+  const releases = rows.results || [];
+  releases.sort((a, b) => {
+    if (a.version === "legacy") return b.version === "legacy" ? 0 : 1;
+    if (b.version === "legacy") return -1;
+    return b.version.localeCompare(a.version, "en", { numeric: true })
+      || b.build.localeCompare(a.build, "en", { numeric: true });
+  });
+  return { releases };
 }
 
 export async function saveRelease(env, body) {

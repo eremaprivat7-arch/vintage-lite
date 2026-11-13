@@ -171,9 +171,9 @@ private struct DashboardView: View {
                 .foregroundStyle(appState.isSupported ? Color.green : Color.red)
             }
 
-            if appState.kernelExploitApplicable && AppInfo.versionTuple.major < 26 {
+            if appState.kernelExploitApplicable {
                 HStack {
-                    Text(language.text("dashboard.kernel_status"))
+                    Text(language.text("dashboard.patch_access"))
                     Spacer()
                     if appState.kernelExploitRunning {
                         HStack(spacing: 6) {
@@ -182,6 +182,10 @@ private struct DashboardView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                    } else if SandboxAccess.needsWorseQuery && !SandboxAccess.hasAppGroup {
+                        Text(language.text("appgroup.title")).foregroundStyle(.orange)
+                    } else if appState.exploitStatus.isFailed {
+                        Text(language.text("common.failed")).foregroundStyle(.red)
                     } else {
                         Text(language.text(appState.exploitStatus.isSuccess ? "dashboard.kernel_active" : "dashboard.kernel_inactive"))
                         .foregroundStyle(appState.exploitStatus.isSuccess ? Color.green : Color.secondary)

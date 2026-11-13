@@ -1257,3 +1257,8 @@
 "patch.error.target_access" = "无法打开目标应用。请确认应用已安装，且当前签名允许设备数据访问。";
 "patch.status.applied" = "补丁已应用";
 "patch.error.target_busy" = "其他补丁正在使用这些文件。请先恢复该补丁的原始文件，再应用当前补丁。";
+
+"dashboard.patch_access" = "设备访问";
+"patch.progress.device_access" = "正在准备设备访问…";
+"patch.error.access_initializing" = "设备访问仍在准备中。请等待设备状态完成后再应用补丁。";
+"patch.error.unsupported_device" = "此版本不支持当前 iOS 的设备访问方式。请在首页查看 iOS 版本和内部版本号。";

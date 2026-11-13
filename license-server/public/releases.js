@@ -5,14 +5,15 @@ function createReleaseControls(root, api) {
     <details class="controls" open>
       <summary>Патч по версиям приложения</summary>
       <p>Закрой старую сборку и оставь новую доступной. Отключение общего патча сохраняет выбор в этом списке.</p>
-      <p class="muted">Старые IPA без номера в запросе объединены в одну строку. В новых IPA версия и сборка указаны в настройках.</p>
+      <p class="muted">Новые сборки появляются после успешной проверки ключа. Старые IPA без номера объединены в одну строку.</p>
+      <button type="button" class="release-refresh">Обновить список</button>
       <div class="table"><table>
         <thead><tr><th>Версия</th><th>Сборка</th><th>Вход</th><th>Управление</th></tr></thead>
         <tbody></tbody>
       </table></div>
       <form class="release-form">
-        <label>Версия<input name="version" placeholder="1.2.0" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
-        <label>Сборка<input name="build" placeholder="8" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
+        <label>Версия<input name="version" placeholder="2.2.6" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
+        <label>Сборка<input name="build" placeholder="17" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
         <label>Вход<select name="state"><option value="allow">Открыт</option><option value="block">Закрыт, требуется обновление</option></select></label>
         <button class="primary">Добавить или сохранить</button>
       </form>
@@ -77,6 +78,20 @@ function createReleaseControls(root, api) {
     event.preventDefault();
     void save({ version: form.elements.version.value.trim(), build: form.elements.build.value.trim(),
       blocked: form.elements.state.value === "block" });
+  };
+  root.querySelector(".release-refresh").onclick = async () => {
+    if (busy) return;
+    busy = true;
+    showRows();
+    try {
+      await load();
+      message.textContent = "Список обновлён.";
+    } catch (error) {
+      message.textContent = error.message;
+    } finally {
+      busy = false;
+      showRows();
+    }
   };
   return load;
 }

@@ -193,6 +193,7 @@ enum PatchPackageError: Error, Equatable {
     case remoteImportFailed
     case missingAppGroup
     case accessUnavailable
+    case unsupportedDevice
 }
 
 extension PatchPackageError: LocalizedError {
@@ -222,6 +223,7 @@ extension PatchPackageError: LocalizedError {
         case .remoteImportFailed: return "patch.error.remote_import"
         case .missingAppGroup: return "appgroup.message"
         case .accessUnavailable: return "patch.error.access_unavailable"
+        case .unsupportedDevice: return "patch.error.unsupported_device"
         }
     }
 

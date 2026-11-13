@@ -658,6 +658,7 @@ extension View {
 
 struct PatchProjectDetailView: View {
     @EnvironmentObject private var license: LicenseSession
+    @EnvironmentObject private var appState: AppState
     @Environment(\.appLanguage) private var language
     @ObservedObject var store: PatchProjectStore
     let projectID: UUID
@@ -787,7 +788,7 @@ struct PatchProjectDetailView: View {
                             .padding(.horizontal, 16).padding(.vertical, 14)
                             .background(.white, in: RoundedRectangle(cornerRadius: 14))
                     }
-                    .disabled(isWorking || receipt != nil)
+                    .disabled(isWorking || receipt != nil || appState.kernelExploitRunning)
 
                     if receipt != nil {
                         Button(role: .destructive) {
@@ -795,7 +796,11 @@ struct PatchProjectDetailView: View {
                         } label: {
                             actionLabel("patch.restore", systemImage: "arrow.uturn.backward.circle")
                         }
-                        .disabled(isWorking)
+                        .disabled(isWorking || appState.kernelExploitRunning)
+                    }
+
+                    if appState.kernelExploitRunning && !isWorking {
+                        ProgressView(language.text("patch.progress.device_access"))
                     }
 
                     if isWorking {
@@ -945,6 +950,11 @@ struct PatchProjectDetailView: View {
     @MainActor
     private func apply() {
         guard !isWorking, let item, let baseProject = item.project else { return }
+        log("patch: preflight iOS=\(AppInfo.osVersion) build=\(AppInfo.osBuild) backend=\(SandboxAccess.backend.displayName) setup=\(appState.exploitStatus.displayText) appGroup=\(SandboxAccess.hasAppGroup)")
+        guard !appState.kernelExploitRunning else {
+            actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.access_initializing")
+            return
+        }
         do {
             try DevicePatchService.validateAccess()
         } catch let error as PatchPackageError {
@@ -1106,7 +1116,7 @@ struct PatchProjectDetailView: View {
     }
 
     private func privateErrorKey(for error: PatchPackageError) -> String {
-        if error == .missingAppGroup || error == .accessUnavailable {
+        if error == .missingAppGroup || error == .accessUnavailable || error == .unsupportedDevice {
             return error.localizationKey
         }
         if case .targetAppUnavailable = error {

@@ -1,5 +1,5 @@
 import {privateContent,manageContent,boundedJSON,limitAdminLogin} from "./private-content.js";
-import { releaseIdentity, releaseBlocked, releaseList, saveRelease, updateNotice } from "./releases.js";
+import { releaseIdentity, releaseBlocked, releaseList, saveRelease, recordRelease, updateNotice } from "./releases.js";
 import {report,reveal,issuedKey} from "./dashboard.js";
 import {manage,reseller} from './reseller.js';
 const encoder = new TextEncoder();
@@ -188,6 +188,7 @@ async function checkLicense(request, env) {
   ).bind(license.id).first();
   if (!license || license.revoked) return json({ error: "invalid" }, 403);
   if (license.expires === null || now >= license.expires) return json({ error: "expired" }, 403);
+  await recordRelease(env, identity);
   return json({ valid: true, remaining: Math.max(1, license.expires - now) });
 }
 

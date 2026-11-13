@@ -1257,3 +1257,8 @@
 "patch.error.target_access" = "Không thể mở ứng dụng đích. Kiểm tra ứng dụng đã được cài và chữ ký cho phép truy cập thiết bị.";
 "patch.status.applied" = "Đã áp dụng bản vá";
 "patch.error.target_busy" = "Một bản vá khác đang sử dụng các tệp này. Khôi phục tệp gốc của bản vá đó trước khi áp dụng.";
+
+"dashboard.patch_access" = "Quyền truy cập thiết bị";
+"patch.progress.device_access" = "Đang chuẩn bị quyền truy cập thiết bị…";
+"patch.error.access_initializing" = "Đang chuẩn bị quyền truy cập thiết bị. Chờ trạng thái hoàn tất rồi áp dụng bản vá.";
+"patch.error.unsupported_device" = "Phiên bản iOS này chưa có cơ chế truy cập thiết bị được hỗ trợ trong bản dựng này. Kiểm tra phiên bản và số bản dựng iOS trên Home.";

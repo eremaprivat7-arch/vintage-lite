@@ -29,9 +29,12 @@ enum DevicePatchService {
         case .worseQuery where !SandboxAccess.hasAppGroup:
             throw PatchPackageError.missingAppGroup
         case .unsupported:
-            throw PatchPackageError.accessUnavailable
-        case .kernel where !KernelExploit.hasKernelSandboxAccess():
-            throw PatchPackageError.accessUnavailable
+            throw PatchPackageError.unsupportedDevice
+        case .kernel:
+            // The upstream iOS 17/18 path can use kernel R/W without the
+            // full-sandbox probe succeeding. Container resolution and the
+            // transaction's real file operations validate this access.
+            break
         default:
             break
         }

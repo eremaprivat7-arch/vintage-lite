@@ -3,11 +3,13 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {privateContent,manageContent,boundedJSON,limitAdminLogin} from '../license-server/src/private-content.js';
 import worker from '../license-server/src/index.js';
+import {recordRelease,releaseList,saveRelease} from '../license-server/src/releases.js';
 const base=new DatabaseSync(':memory:'),content=new DatabaseSync(':memory:');
 content.exec('PRAGMA foreign_keys=ON');
 base.exec(readFileSync(new URL('../license-server/migrations/0001_init.sql',import.meta.url),'utf8'));
 base.exec(readFileSync(new URL('../license-server/migrations/0002_patch_mode.sql',import.meta.url),'utf8'));
 base.exec(readFileSync(new URL('../license-server/migrations/0006_app_releases.sql',import.meta.url),'utf8'));
+base.exec(readFileSync(new URL('../license-server/migrations/0007_release_discovery.sql',import.meta.url),'utf8'));
 content.exec(readFileSync(new URL('../license-server/private-content/schema.sql',import.meta.url),'utf8'));
 const encoder=new TextEncoder(),td=new TextDecoder();
 const hex=x=>Buffer.from(x).toString('hex'),b64=x=>Buffer.from(x).toString('base64');
@@ -105,13 +107,21 @@ assert.equal(snapshot(),original,'existing licenses, bindings, expiry and balanc
 const rawEnv={...env,DB:binding(base),ADMIN_PASSWORD:'only-for-tests',SESSION_SECRET:'test-secret-that-is-longer-than-thirty-two-characters'};
 const statusFor=async(version,build)=>worker.fetch(
   new Request('https://example.test/api/status?'+new URLSearchParams({app_version:version,app_build:build})),rawEnv);
-base.prepare('INSERT INTO app_releases(version,build,blocked) VALUES(?,?,1)').run('2.2.5','16');
-assert.equal((await (await statusFor('2.2.5','16')).json()).update_required,true,'new release enters its patch mode');
-assert.notEqual((await (await statusFor('2.2.4','15')).json()).update_required,true,'the release block leaves older versions enabled');
-const newReleaseCheck=await worker.fetch(new Request('https://example.test/api/check',{
-  method:'POST',body:JSON.stringify({key:rawKey,device,app_version:'2.2.5',app_build:'16'})}),rawEnv);
-assert.equal(newReleaseCheck.status,503,'patch mode blocks key checks for the new build');
-base.prepare('DELETE FROM app_releases WHERE version=? AND build=?').run('2.2.5','16');
+const seeded=await releaseList(rawEnv);
+assert.ok(seeded.releases.some(r=>r.version==='2.2.5'&&r.build==='16'),'2.2.5 is present before a client reconnects');
+assert.ok(seeded.releases.some(r=>r.version==='2.2.6'&&r.build==='17'),'the hotfix is present in the admin catalog');
+for(const [version,build] of [['2.2.5','16'],['2.2.6','17']]){
+  assert.equal((await saveRelease(rawEnv,{version,build,blocked:true})).ok,true);
+  await recordRelease(rawEnv,{version,build});
+  base.exec(readFileSync(new URL('../license-server/migrations/0007_release_discovery.sql',import.meta.url),'utf8'));
+  assert.equal((await (await statusFor(version,build)).json()).update_required,true,'discovery and migration never reopen a blocked release');
+  assert.notEqual((await (await statusFor('2.2.4','15')).json()).update_required,true,'the release block leaves older versions enabled');
+  const checked=await worker.fetch(new Request('https://example.test/api/check',{
+    method:'POST',body:JSON.stringify({key:rawKey,device,app_version:version,app_build:build})}),rawEnv);
+  assert.equal(checked.status,503,'per-release patch mode blocks the selected build');
+  assert.equal((await saveRelease(rawEnv,{version,build,blocked:false})).ok,true);
+  assert.notEqual((await (await statusFor(version,build)).json()).update_required,true,'the admin can reopen a release');
+}
 base.exec('UPDATE patch_mode SET started=unixepoch() WHERE id=1');
 assert.equal((await (await statusFor('2.2.5','16')).json()).maintenance,true,'global patch mode also covers the new build');
 base.exec('UPDATE patch_mode SET started=NULL WHERE id=1');
@@ -121,6 +131,16 @@ assert.equal((await worker.fetch(unauth,rawEnv)).status,401,'owner uploads are n
 const oldCheck=await worker.fetch(new Request('https://example.test/api/check',{method:'POST',body:JSON.stringify({key:rawKey,device,app_version:'2.0.0',app_build:'9'})}),rawEnv);
 assert.equal(oldCheck.status,200,'legacy app still validates existing key');
 assert.equal((await oldCheck.json()).valid,true);
+assert.equal(base.prepare('SELECT blocked FROM app_releases WHERE version=? AND build=?').get('2.0.0','9').blocked,0,'successful key validation discovers a release');
+const rejectedVersion=await worker.fetch(new Request('https://example.test/api/check',{method:'POST',body:JSON.stringify({key:'VL-INVALID-INVALID',device,app_version:'2.9.9',app_build:'99'})}),rawEnv);
+assert.equal(rejectedVersion.status,403);
+assert.equal(base.prepare('SELECT COUNT(*) AS count FROM app_releases WHERE version=?').get('2.9.9').count,0,'invalid keys cannot populate the release list');
+await recordRelease(rawEnv,{version:'2.2.10',build:'21'});
+const ordered=(await releaseList(rawEnv)).releases;
+assert.ok(ordered.findIndex(r=>r.version==='2.2.10')<ordered.findIndex(r=>r.version==='2.2.6'),'versions use numeric ordering');
+assert.equal(ordered.at(-1).version,'legacy','the legacy group stays after numbered releases');
+await statusFor('2.8.8','88');
+assert.equal(base.prepare('SELECT COUNT(*) AS count FROM app_releases WHERE version=?').get('2.8.8').count,0,'public status probes do not register versions');
 assert.equal(snapshot(),original);
 await assert.rejects(boundedJSON(new Request('https://example.test',{method:'POST',body:'x'.repeat(5000)})),/too_large/);
 for(let i=0;i<10;i++)await limitAdminLogin(new Request('https://example.test',{headers:{'CF-Connecting-IP':'192.0.2.99'}}),env);

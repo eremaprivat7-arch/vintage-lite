@@ -1257,3 +1257,8 @@
 "patch.error.target_access" = "The target app could not be opened. Check that it is installed and that this signature permits device access.";
 "patch.status.applied" = "Patch applied";
 "patch.error.target_busy" = "Another patch is active for these files. Restore its originals before applying this patch.";
+
+"dashboard.patch_access" = "Device access";
+"patch.progress.device_access" = "Preparing device access…";
+"patch.error.access_initializing" = "Device access is still being prepared. Wait for the device status to finish, then apply the patch.";
+"patch.error.unsupported_device" = "This iOS version has no supported device-access backend in this build. Check the iOS version and build number on Home.";
