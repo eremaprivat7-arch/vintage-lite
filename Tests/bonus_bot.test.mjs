@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import worker from '../reseller-bot/worker.js';
 import { manage } from '../license-server/src/reseller.js';
+import licenseWorker from '../license-server/src/index.js';
 
 const sqlite = new DatabaseSync(':memory:');
-for (const file of ['../license-server/migrations/0001_init.sql', '../license-server/migrations/0002_patch_mode.sql', '../license-server/migrations/0003_reseller_api.sql', '../reseller-bot/schema.sql', '../license-server/migrations/0004_dashboard.sql', '../license-server/migrations/0005_reseller_profiles.sql']) {
+for (const file of ['../license-server/migrations/0001_init.sql', '../license-server/migrations/0002_patch_mode.sql', '../license-server/migrations/0003_reseller_api.sql', '../reseller-bot/schema.sql', '../license-server/migrations/0004_dashboard.sql', '../license-server/migrations/0005_reseller_profiles.sql', '../license-server/migrations/0011_bot_only_resellers.sql']) {
   sqlite.exec(readFileSync(new URL(file, import.meta.url), 'utf8'));
 }
 let beforeOrderWrite;
@@ -25,7 +26,7 @@ const env = {
   DB: { prepare: sql => new Statement(sql), batch: statements => Promise.all(statements.map(statement => statement.all())) },
   TELEGRAM_BOT_TOKEN: 'fixture-only-token', ADMIN_ID: '777',
   WEBHOOK_SECRET: 'fixture-only-webhook', KEY_SECRET: 'fixture-only-key-secret', API_TOKEN: 'fixture-only-api-token',
-  SESSION_SECRET: 'fixture-only-session-secret-for-token-vault'
+  SESSION_SECRET: 'fixture-only-session-secret-for-token-vault', ADMIN_PASSWORD: 'fixture-only-admin-password'
 };
 const user = '123';
 sqlite.prepare('INSERT INTO shop_wallet(uid,balance) VALUES(?,?)').run(user, 1000);
@@ -150,12 +151,53 @@ try {
       method: 'POST', body: JSON.stringify({ uid: resellerID, action, name: 'Fixture reseller', prices: apiPrices })
     }), env);
     assert.equal(response.status, 200, 'the real admin handler updates reseller access');
+    return response.json();
   };
   noPrices(await message('🔑 Получить ключ', resellerID));
   noPrices(await resellerButton());
   assert.equal(resellerWallet(), 6000, 'a wallet alone does not grant reseller access');
   assert.equal(orders(), 2);
   await resellerAdminAction('create');
+  noPrices(await message('/buy', resellerID));
+  noPrices(await resellerButton());
+  assert.equal(orders(), 2, 'an API token does not grant Telegram purchase access');
+
+  // Exercise the actual protected admin route, not a handler without its auth wrapper.
+  const adminURL = 'https://fixture.test/admin/api/bot-resellers';
+  const adminHeaders = { 'Content-Type': 'application/json', 'X-Requested-With': 'vintage-admin', Origin: 'https://fixture.test' };
+  const login = await licenseWorker.fetch(new Request('https://fixture.test/admin/api/login', {
+    method: 'POST', headers: adminHeaders, body: JSON.stringify({ password: env.ADMIN_PASSWORD })
+  }), env);
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('Set-Cookie').split(';')[0];
+  const botAdmin = (body, options = {}) => licenseWorker.fetch(new Request(adminURL, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { ...adminHeaders, Cookie: cookie, ...options.headers },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...options
+  }), env);
+  for (const method of ['GET', 'POST']) {
+    assert.equal((await licenseWorker.fetch(new Request(adminURL, { method }), env)).status, 401);
+  }
+  assert.equal((await botAdmin({ uid: resellerID }, { headers: { Cookie: cookie } })).status, 403, 'mutation requires the admin request header');
+  assert.equal((await botAdmin({ uid: resellerID }, { headers: { ...adminHeaders, Cookie: cookie, Origin: 'https://foreign.test' } })).status, 403, 'cross-origin mutation denied');
+  assert.equal((await botAdmin(undefined, { method: 'DELETE' })).status, 405);
+  for (const bad of [null, [], {}, { uid: 123 }, { uid: '0' }, { uid: '-12' }, { uid: '1'.repeat(17) }, { uid: '12x' }, { uid: '123', action: 'issue' }]) {
+    assert.equal((await botAdmin(bad)).status, 400);
+  }
+  assert.equal((await botAdmin({ uid: resellerID, junk: 'x'.repeat(5000) })).status, 400);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM bot_resellers').get().n, 0, 'unauthorized or invalid requests do not add users');
+  const apiSnapshot = () => JSON.stringify(['reseller_access', 'portal_tokens', 'portal_names'].map(table => sqlite.prepare('SELECT * FROM '+table+' ORDER BY uid').all()));
+  const apiBeforeAdd = apiSnapshot();
+  const botAdminAction = async (action, uid = resellerID) => {
+    const response = await botAdmin({ uid, action });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  await botAdminAction('add');
+  await botAdminAction('add');
+  assert.equal(apiSnapshot(), apiBeforeAdd, 'adding by Telegram ID neither issues nor edits an API token or API prices');
+  assert.equal(resellerWallet(), 6000, 'duplicate add preserves the existing wallet');
+  assert.equal((await (await botAdmin()).json()).items[0].uid, resellerID);
   const resellerStart = (await message('/start', resellerID)).find(call => call.method === 'sendMessage').body;
   const resellerKeyboard = resellerStart.reply_markup.keyboard.flat();
   assert.ok(resellerKeyboard.includes('🔑 Получить ключ'));
@@ -175,12 +217,22 @@ try {
   assert.equal(resellerWallet(), 1000);
   assert.equal(orders(), resellerOrders);
   await resellerAdminAction('revoke');
+  assert.ok((await message('/buy', resellerID)).some(call => call.body.reply_markup?.inline_keyboard?.length === 5), 'API revocation does not disable bot access');
+  await resellerAdminAction('delete');
+  assert.ok((await message('/buy', resellerID)).some(call => call.body.reply_markup?.inline_keyboard?.length === 5), 'API deletion does not disable bot access');
+  await resellerAdminAction('issue');
+  const apiBeforeRemove = apiSnapshot();
+  await botAdminAction('remove');
   noPrices(await message('🔑 Получить ключ', resellerID));
   noPrices(await resellerButton(81));
   assert.equal(resellerWallet(), 1000);
   assert.equal(orders(), resellerOrders);
-  await resellerAdminAction('issue');
-  beforeOrderWrite = () => resellerAdminAction('revoke');
+  assert.equal(apiSnapshot(), apiBeforeRemove, 'removing bot permission leaves API token, prices and profile intact');
+  const { token: apiToken } = await resellerAdminAction('issue');
+  noPrices(await message('/buy', resellerID));
+  assert.equal(sqlite.prepare('SELECT enabled FROM bot_resellers WHERE uid=?').get(resellerID).enabled, 0, 'reissuing an API token cannot restore bot permission');
+  await botAdminAction('add');
+  beforeOrderWrite = () => botAdminAction('remove');
   const raced = await telegram({ callback_query: {
     id: 'revocation-race', from: { id: Number(resellerID) }, data: 'buy:1:250',
     message: { message_id: 82, chat: { id: Number(resellerID), type: 'private' } }
@@ -188,13 +240,43 @@ try {
   assert.ok(!raced.some(call => call.body.parse_mode === 'HTML'));
   assert.equal(resellerWallet(), 1000, 'revocation between the menu check and insert prevents debit');
   assert.equal(orders(), resellerOrders);
-  await resellerAdminAction('issue');
-  await resellerAdminAction('delete');
-  noPrices(await message('/buy', resellerID));
-  noPrices(await resellerButton(83));
-  assert.equal(orders(), resellerOrders, 'removing a reseller blocks old purchase buttons');
   assert.equal(sqlite.prepare('SELECT prices FROM reseller_access WHERE uid=?').get(resellerID).prices, JSON.stringify(apiPrices), 'Telegram rates do not rewrite individual API prices');
   assert.equal(sqlite.prepare('SELECT price FROM shop_plans WHERE days=1').get().price, 150, 'legacy API plan prices are preserved');
+
+  const botOnlyID = '789';
+  await botAdminAction('add', botOnlyID);
+  assert.equal(sqlite.prepare('SELECT balance FROM shop_wallet WHERE uid=?').get(botOnlyID).balance, 0);
+  assert.equal(sqlite.prepare('SELECT * FROM reseller_access WHERE uid=?').get(botOnlyID), undefined);
+  assert.equal(sqlite.prepare('SELECT * FROM portal_tokens WHERE uid=?').get(botOnlyID), undefined);
+  await message('/balance '+botOnlyID+' +3000', owner);
+  const botOnlyCard = (await telegram({ callback_query: {
+    id: 'bot-only-purchase', from: { id: Number(botOnlyID) }, data: 'buy:7:1500',
+    message: { message_id: 90, chat: { id: Number(botOnlyID), type: 'private' } }
+  } })).find(call => call.body.parse_mode === 'HTML').body;
+  assert.match(botOnlyCard.text, /7 дней/);
+  assert.equal(sqlite.prepare('SELECT balance FROM shop_wallet WHERE uid=?').get(botOnlyID).balance, 1500, 'bot-only reseller can buy after a normal owner top-up');
+  assert.equal(sqlite.prepare('SELECT * FROM reseller_access WHERE uid=?').get(botOnlyID), undefined, 'bot purchases do not silently issue API access');
+  assert.equal(sqlite.prepare('SELECT * FROM portal_tokens WHERE uid=?').get(botOnlyID), undefined);
+  assert.equal(sqlite.prepare('SELECT * FROM portal_names WHERE uid=?').get(botOnlyID), undefined);
+  const beforeMigration = apiSnapshot();
+  sqlite.exec(readFileSync(new URL('../license-server/migrations/0011_bot_only_resellers.sql', import.meta.url), 'utf8'));
+  assert.equal(apiSnapshot(), beforeMigration, 'rerunning the migration preserves all API settings');
+  assert.equal(sqlite.prepare('SELECT enabled FROM bot_resellers WHERE uid=?').get(resellerID).enabled, 0, 'rerunning the migration does not reapprove removed users');
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM bot_resellers').get().n, 2, 'migration never copies API users into bot access');
+
+  const apiRequest = (path, payload) => licenseWorker.fetch(new Request('https://fixture.test/reseller/api/'+path, {
+    method: payload ? 'POST' : 'GET', headers: { Authorization: 'Bearer '+apiToken },
+    ...(payload ? { body: JSON.stringify(payload) } : {})
+  }), env);
+  const apiAccount = await (await apiRequest('account')).json();
+  assert.deepEqual(apiAccount.prices, apiPrices, 'the same API token still exposes the original individual rates');
+  const apiPayload = { order_id: 'after-bot-removal', days: 1, price: 75 };
+  const apiKey = await (await apiRequest('purchase', apiPayload)).json();
+  assert.equal(apiKey.cost, 75);
+  assert.match(apiKey.key, /^VL-[A-F0-9]{32}$/);
+  assert.equal(resellerWallet(), 925, 'API purchase still works at its old rate after bot permission is removed');
+  assert.equal((await (await apiRequest('purchase', apiPayload)).json()).key, apiKey.key);
+  assert.equal(resellerWallet(), 925, 'API order retries do not debit twice');
 
   const legacyUID = '555';
   const legacyEvent = 'tg:' + legacyUID + ':60';
@@ -251,7 +333,7 @@ try {
     method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'wrong' }, body: '{}'
   }), env);
   assert.equal(wrongSecret.status, 403);
-  console.log('PASS: admin-approved reseller access, exact Telegram rates, revocation and removal, atomic authorization, copyable key cards, idempotent billing, legacy order retries, bonus and expiry flows, preserved API tariffs');
+  console.log('PASS: separate bot-only and API permissions, protected admin CRUD, Telegram-ID-only approval, exact Telegram rates, revocation race, copyable key cards, idempotent billing, legacy orders, bonus and expiry, preserved API tokens/prices/profiles');
 } finally {
   globalThis.fetch = realFetch;
   sqlite.close();

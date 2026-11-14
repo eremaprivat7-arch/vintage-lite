@@ -9,9 +9,20 @@
   <header><div><div class="brand">VINTAGE LITE</div><h1>Панель владельца</h1></div><button id="logout" class="hidden">Выйти</button></header>
   <section id="login-panel"><h2>Вход администратора</h2><form id="login-form" class="row"><label>Пароль администратора<input id="password" type="password" autocomplete="current-password" required></label><button class="primary">Войти</button></form><div id="login-message" class="status"></div></section>
   <div id="dashboard" class="hidden">
+    <details class="controls" id="bot-reseller-controls" open>
+      <summary>Реселлеры Telegram-бота</summary>
+      <p class="muted">Добавь Telegram ID, чтобы разрешить покупку в нашем боте. API-токен не выдаётся.</p>
+      <form id="bot-reseller-form" class="row">
+        <label>Telegram ID<input name="uid" inputmode="numeric" maxlength="16" required pattern="[1-9][0-9]{0,15}" placeholder="123456789"></label>
+        <button class="primary" type="submit">Добавить реселлера</button>
+      </form>
+      <p id="bot-reseller-result" class="status" role="status"></p>
+      <div id="bot-reseller-list" class="profiles"></div>
+      <small>Баланс пополняется через меню владельца в Telegram-боте.</small>
+    </details>
     <div id="reports"></div><button id="refresh">Обновить статистику</button><details class="controls"><summary>Общий патч для всех версий</summary><h2 hidden>Режим патча</h2><button id="patch" disabled>Загрузка…</button><p id="patch-status" role="status"></p></details>
     <div id="release-controls"></div>
-    <details class="controls" id="profiles"><summary>Добавить реселлера / настройки API</summary><form id="reseller"><label>Telegram ID<input name="uid" required pattern="[1-9][0-9]{0,15}"></label><label>Имя реселлера<input name="name" maxlength="64"></label><button value="name">Сохранить имя</button><button class="primary" value="create">Создать реселлера и API</button><div class="row"><label>1 дн. · ₸<input type="number" min="1" name="p1" value="150" required></label><label>3 дн. · ₸<input type="number" min="1" name="p3" value="420" required></label><label>7 дн. · ₸<input type="number" min="1" name="p7" value="900" required></label><label>15 дн. · ₸<input type="number" min="1" name="p15" value="2100" required></label><label>30 дн. · ₸<input type="number" min="1" name="p30" value="3000" required></label></div><button value="show" formnovalidate>Показать токен</button><button value="issue">Перевыпустить токен</button> <button value="prices">Сохранить цены</button> <button value="revoke" formnovalidate>Отключить API</button><button class="danger" value="delete" formnovalidate>Удалить реселлера</button><label>Сохранить существующий токен<input name="token" type="password" autocomplete="off"></label><button value="save-token" formnovalidate>Сохранить токен</button></form><div id="api-result" style="overflow-wrap:anywhere"></div><a href="/reseller.html">Открыть кабинет реселлера</a></details><details class="controls"><summary>Создать ключ вручную</summary><form id="create-form" class="row">
+    <details class="controls" id="profiles"><summary>Реселлеры API / настройки</summary><form id="reseller"><label>Telegram ID<input name="uid" required pattern="[1-9][0-9]{0,15}"></label><label>Имя реселлера<input name="name" maxlength="64"></label><button value="name">Сохранить имя</button><button class="primary" value="create">Создать реселлера и API</button><div class="row"><label>1 дн. · ₸<input type="number" min="1" name="p1" value="150" required></label><label>3 дн. · ₸<input type="number" min="1" name="p3" value="420" required></label><label>7 дн. · ₸<input type="number" min="1" name="p7" value="900" required></label><label>15 дн. · ₸<input type="number" min="1" name="p15" value="2100" required></label><label>30 дн. · ₸<input type="number" min="1" name="p30" value="3000" required></label></div><button value="show" formnovalidate>Показать токен</button><button value="issue">Перевыпустить токен</button> <button value="prices">Сохранить цены</button> <button value="revoke" formnovalidate>Отключить API</button><button class="danger" value="delete" formnovalidate>Удалить реселлера</button><label>Сохранить существующий токен<input name="token" type="password" autocomplete="off"></label><button value="save-token" formnovalidate>Сохранить токен</button></form><div id="api-result" style="overflow-wrap:anywhere"></div><a href="/reseller.html">Открыть кабинет реселлера</a></details><details class="controls"><summary>Создать ключ вручную</summary><form id="create-form" class="row">
       <label>Устройств<input name="seats" type="number" min="1" max="100000" value="1" required></label>
       <label>Срок<input name="duration" type="number" min="1" max="36500" value="1" required></label>
       <label>Единицы<select name="unit"><option value="days">Дни</option><option value="hours">Часы</option></select></label>
@@ -43,12 +54,42 @@ const render=dashboardView($("#reports"),true,(path,method="GET",body)=>api("/ad
   const prices=JSON.parse(account.prices||"{}");for(const d of [1,3,7,15,30])form.elements["p"+d].value=prices[d]??form.elements["p"+d].defaultValue;
   $("#profiles").open=true;form.elements.token.value='';$('#api-result').textContent='';form.elements.name.focus()
 });
+async function loadBotResellers(){
+  const data=await api('/admin/api/bot-resellers');
+  const list=$('#bot-reseller-list');list.replaceChildren();
+  if(!data.items.length){list.textContent='Реселлеры для бота пока не добавлены.';return}
+  for(const account of data.items){
+    const row=document.createElement('div');row.className='profile';
+    const id=document.createElement('code');id.textContent=account.uid;
+    const balance=document.createElement('small');balance.textContent='Баланс: '+Number(account.balance).toLocaleString('ru-RU')+' ₸';
+    const actions=document.createElement('div');actions.className='actions';
+    const button=document.createElement('button');button.type='button';button.className='danger';button.textContent='Убрать из бота';
+    button.onclick=async()=>{
+      button.disabled=true;
+      try{
+        const result=await api('/admin/api/bot-resellers',{method:'POST',body:JSON.stringify({uid:account.uid,action:'remove'})});
+        $('#bot-reseller-result').textContent=result.message;await loadBotResellers();
+      }catch(error){showError($('#bot-reseller-result'),error);button.disabled=false}
+    };
+    actions.append(button);row.append(id,balance,actions);list.append(row);
+  }
+}
+$('#bot-reseller-form').onsubmit=async event=>{
+  event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;
+  const resultBox=$('#bot-reseller-result');resultBox.className='status';resultBox.textContent='';
+  try{
+    const uid=new FormData(form).get('uid').trim();
+    const result=await api('/admin/api/bot-resellers',{method:'POST',body:JSON.stringify({uid,action:'add'})});
+    resultBox.textContent=result.message;resultBox.className='status success';form.reset();await loadBotResellers();
+  }catch(error){showError(resultBox,error)}finally{button.disabled=false}
+};
 async function loadKeys(){
 const data=await api("/admin/api/report");pauseStart=data.started;render(data);
 patchButton.textContent=pauseStart===null?"Включить патч":"Завершить патч";
 $("#patch-status").textContent=pauseStart===null?"Вход открыт":"Вход закрыт. Сроки ключей приостановлены.";
 patchButton.disabled=false;
 await loadReleases();
+await loadBotResellers();
 }
 $("#login-form").addEventListener("submit",async e=>{e.preventDefault();const msg=$("#login-message");msg.textContent="";try{await api("/admin/api/login",{method:"POST",body:JSON.stringify({password:$("#password").value})});$("#password").value="";setLoggedIn(true);await loadKeys()}catch(err){showError(msg,err)}});
 $("#create-form").addEventListener("submit",async e=>{e.preventDefault();notice.textContent="";const f=new FormData(e.currentTarget),until=f.get("until");const payload={seats:Number(f.get("seats")),duration:Number(f.get("duration")),unit:f.get("unit"),until:until?`${until}:00+05:00`:""};try{const result=await api("/admin/api/keys",{method:"POST",body:JSON.stringify(payload)});const box=$("#new-key");box.classList.remove("hidden");box.innerHTML=`<div class="success">Ключ создан.</div><code class="key">${esc(result.key)}</code><button id="copy-key">Скопировать</button>`;$("#copy-key").onclick=()=>navigator.clipboard.writeText(result.key);notice.textContent="Ключ создан.";notice.className="status success";await loadKeys()}catch(err){showError(notice,err)}});

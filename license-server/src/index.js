@@ -2,6 +2,7 @@ import {privateContent,manageContent,boundedJSON,limitAdminLogin} from "./privat
 import { releaseIdentity, releaseBlocked, releaseList, saveRelease, recordRelease, updateNotice } from "./releases.js";
 import {report,reveal,issuedKey} from "./dashboard.js";
 import {manage,reseller} from './reseller.js';
+import { manageBotResellers } from './bot-resellers.js';
 const encoder = new TextEncoder();
 const SESSION_SECONDS = 12 * 60 * 60;
 const COOKIE_NAME = "vl_admin";
@@ -262,6 +263,7 @@ async function adminApi(request, env, url) {
 
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
+  if (url.pathname === '/admin/api/bot-resellers') return manageBotResellers(request, env);
   if (url.pathname.startsWith("/admin/api/content/")) return manageContent(request,env,url);
   if (url.pathname === "/admin/api/releases" && request.method === "GET") return json(await releaseList(env));
   if (url.pathname === "/admin/api/releases" && request.method === "POST") {

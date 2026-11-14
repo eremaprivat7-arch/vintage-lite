@@ -28,7 +28,7 @@ async function purchase(env,uid,days,event,price,fromTelegram=false){
       await env.DB.prepare(`INSERT INTO shop_orders(event,uid,days,cost,digest)
         SELECT ?,?,days,?,? FROM shop_plans
         WHERE days=? AND ?=? AND (?=1 OR EXISTS(
-          SELECT 1 FROM reseller_access WHERE uid=? AND token_hash IS NOT NULL
+          SELECT 1 FROM bot_resellers WHERE uid=? AND enabled=1
         )) ON CONFLICT(event) DO NOTHING`).bind(event,uid,standardPrice,hash,days,standardPrice,price,Number(isOwner(env,uid)),uid).run();
     }else{
       await env.DB.prepare(`INSERT INTO shop_orders(event,uid,days,cost,digest)
@@ -119,7 +119,7 @@ async function handle(env,u){
   if(!msg || msg.chat.type!=='private') return;
   const uid=String((cb?.from ?? msg.from).id);
   const admin=isOwner(env,uid);
-  const canPurchase=admin || !!(await env.DB.prepare('SELECT uid FROM reseller_access WHERE uid=? AND token_hash IS NOT NULL').bind(uid).first());
+  const canPurchase=admin || !!(await env.DB.prepare('SELECT uid FROM bot_resellers WHERE uid=? AND enabled=1').bind(uid).first());
   const send=(text,reply_markup=admin?adminMenu:canPurchase?resellerMenu:userMenu,options={})=>telegram(env,'sendMessage',{...options,chat_id:uid,text,reply_markup});
   async function showPurchasePlans(){
     const {results}=await env.DB.prepare('SELECT days FROM shop_plans ORDER BY days').all();
