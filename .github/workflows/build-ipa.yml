@@ -3,6 +3,7 @@ name: VintageLite Full Release
 on:
   push:
     tags: ['v*']
+    branches: ['ci/**']
   workflow_dispatch:
     inputs:
       publish:
@@ -81,7 +82,7 @@ jobs:
 
   publish:
     needs: build
-    if: github.event_name == 'push' || inputs.publish
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     permissions:
       contents: write
     runs-on: ubuntu-latest

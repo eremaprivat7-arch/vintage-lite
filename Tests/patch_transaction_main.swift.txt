@@ -47,7 +47,14 @@ do {
     try fm.removeItem(at: package)
     var active = PatchTransaction.activeTransactions(backupRoot: backups)
     check(active.count == 1, "a removed package remains recoverable from its journal")
-    check(active.first?.receipt == receipt, "recovery uses the original transaction receipt")
+    let recoveredReceipt = active[0].receipt
+    check(recoveredReceipt.id == receipt.id && recoveredReceipt.projectID == receipt.projectID,
+          "recovery uses the original transaction identifiers")
+    // FileManager can return a URL with a different base or /var alias.
+    // Compare the canonical file path rather than URL representation details.
+    check(PatchPathValidator.canonicalFileURL(recoveredReceipt.journalURL).path
+          == PatchPathValidator.canonicalFileURL(receipt.journalURL).path,
+          "recovery points to the original journal file")
     check(active.first?.projectName == "Old boost", "new journals retain the project title")
     check(active.first?.bundleIDs == [bundleID], "the target app is visible in recovery")
     check(PatchTransaction.activeTransactions(backupRoot: backups, conflictingWith: next).count == 1,
@@ -63,9 +70,9 @@ do {
     } catch PatchPackageError.targetOccupied(_) {}
     let stillPatched = try Data(contentsOf: target)
     check(stillPatched == firstBytes, "the failed apply leaves the old patch intact")
-    let inspection = try PatchTransaction.inspectRestore(receipt: receipt, containerResolver: resolve)
+    let inspection = try PatchTransaction.inspectRestore(receipt: recoveredReceipt, containerResolver: resolve)
     check(inspection.changedTargets.isEmpty, "unchanged replacement can be restored normally")
-    try PatchTransaction.restore(receipt: receipt, containerResolver: resolve)
+    try PatchTransaction.restore(receipt: recoveredReceipt, containerResolver: resolve)
     let restored = try Data(contentsOf: target)
     check(restored == original, "recovery restores the actual saved original")
     check(PatchTransaction.activeTransactions(backupRoot: backups).isEmpty, "restoration removes the active lock")
