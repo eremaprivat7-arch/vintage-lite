@@ -31,6 +31,7 @@ jobs:
         run: |
           python3 Tests/check_private_release.py
           bash Tests/check_bundled_packages.sh
+          bash Tests/run_patch_transaction_tests.sh
           node --experimental-sqlite Tests/private_content.test.mjs
           bash Tests/run_policy_tests.sh
 

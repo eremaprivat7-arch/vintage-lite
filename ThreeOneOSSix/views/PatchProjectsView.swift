@@ -673,6 +673,8 @@ struct PatchProjectDetailView: View {
     @State private var operationStarted = Date()
     @State private var progressID: UUID?
     @State private var actionAlert: PatchStoreAlert?
+    @State private var showRecovery = false
+    @State private var recoveryWorking = false
 
     private var item: PatchLibraryItem? {
         store.items.first(where: { $0.id == projectID })
@@ -832,6 +834,17 @@ struct PatchProjectDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $showRecovery) {
+            NavigationStack {
+                AppliedPatchRecoveryView(store: store, isWorking: $recoveryWorking, conflictingProject: item?.project)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(language.text("common.done")) { showRecovery = false }
+                                .disabled(recoveryWorking)
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $showEditor) {
             if let item, let project = item.project {
                 PatchProjectEditorView(
@@ -880,7 +893,15 @@ struct PatchProjectDetailView: View {
             Text(changedRestoreMessage)
         }
         .alert(item: $actionAlert) { alert in
-            Alert(
+            if alert.messageKey == "patch.error.target_busy" {
+                return Alert(
+                    title: Text(language.text(alert.titleKey)),
+                    message: Text(alert.message(language: language)),
+                    primaryButton: .default(Text(language.text("patch.recovery.open"))) { showRecovery = true },
+                    secondaryButton: .cancel(Text(language.text("common.cancel")))
+                )
+            }
+            return Alert(
                 title: Text(language.text(alert.titleKey)),
                 message: Text(alert.message(language: language)),
                 dismissButton: .default(Text(language.text("common.ok")))
@@ -1141,5 +1162,156 @@ struct PatchProjectDetailView: View {
             return error.localizationArgument
         }
         return nil
+    }
+}
+
+/// Restores saved transactions independently of the current package catalog.
+struct AppliedPatchRecoveryView: View {
+    @Environment(\.appLanguage) private var language
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject var store: PatchProjectStore
+    @Binding var isWorking: Bool
+    var conflictingProject: PatchProject? = nil
+    @State private var transactions: [ActivePatchTransaction] = []
+    @State private var selected: ActivePatchTransaction?
+    @State private var changedCount = 0
+    @State private var showConfirmation = false
+    @State private var alert: PatchStoreAlert?
+
+    var body: some View {
+        List {
+            Section {
+                Text(language.text("patch.recovery.description"))
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            if transactions.isEmpty {
+                Section {
+                    Label(language.text("patch.recovery.empty"), systemImage: "checkmark.circle")
+                }
+            } else {
+                ForEach(transactions) { transaction in
+                    Section {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(title(for: transaction)).font(.headline)
+                            Text(transaction.bundleIDs.joined(separator: "\n"))
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(transaction.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(transaction.receipt.projectID.uuidString.prefix(8)))
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            if transaction.needsRecovery {
+                                Label(language.text("patch.recovery.pending"), systemImage: "exclamationmark.triangle")
+                                    .font(.caption).foregroundStyle(.orange)
+                            }
+                        }
+                        Button {
+                            inspect(transaction)
+                        } label: {
+                            Label(language.text("patch.restore"), systemImage: "arrow.uturn.backward.circle")
+                        }
+                        .disabled(isWorking || appState.kernelExploitRunning)
+                    }
+                }
+            }
+            if isWorking { ProgressView(language.text("patch.progress.restore")) }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(language.text("patch.recovery.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isWorking)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { reload() } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(isWorking)
+                    .accessibilityLabel(language.text("backup.refresh"))
+            }
+        }
+        .onAppear(perform: reload)
+        .interactiveDismissDisabled(isWorking)
+        .confirmationDialog(
+            language.text(changedCount > 0 ? "patch.restore_changed_title" : "patch.restore_confirm_title"),
+            isPresented: $showConfirmation,
+            titleVisibility: .visible
+        ) {
+            if let selected {
+                Button(language.text(changedCount > 0 ? "patch.restore_changed_action" : "patch.restore"), role: .destructive) {
+                    restore(selected, allowChangedTargets: changedCount > 0)
+                }
+            }
+            Button(language.text("common.cancel"), role: .cancel) { selected = nil }
+        } message: {
+            if changedCount > 0 {
+                Text(language.text("patch.restore_changed_private_message", Int64(changedCount)))
+            } else {
+                Text(language.text("patch.recovery.confirm"))
+            }
+        }
+        .alert(item: $alert) { value in
+            Alert(title: Text(language.text(value.titleKey)),
+                  message: Text(value.message(language: language)),
+                  dismissButton: .default(Text(language.text("common.ok"))))
+        }
+    }
+
+    private func title(for transaction: ActivePatchTransaction) -> String {
+        if let name = transaction.projectName, !name.isEmpty { return name }
+        if let name = store.items.first(where: { $0.id == transaction.receipt.projectID })?.project?.name {
+            return name
+        }
+        return language.text("patch.recovery.previous")
+    }
+
+    private func reload() {
+        transactions = DevicePatchService.activeTransactions(conflictingWith: conflictingProject)
+    }
+
+    @MainActor
+    private func inspect(_ transaction: ActivePatchTransaction) {
+        guard !isWorking, !appState.kernelExploitRunning else { return }
+        isWorking = true
+        let receipt = transaction.receipt
+        Task {
+            defer { isWorking = false }
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try DevicePatchService.inspectRestore(receipt: receipt)
+                }.value
+                selected = transaction
+                changedCount = result.changedTargets.count
+                showConfirmation = true
+            } catch { report(error) }
+        }
+    }
+
+    @MainActor
+    private func restore(_ transaction: ActivePatchTransaction, allowChangedTargets: Bool) {
+        guard !isWorking, !appState.kernelExploitRunning else { return }
+        isWorking = true
+        let receipt = transaction.receipt
+        Task {
+            defer { isWorking = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try DevicePatchService.restore(receipt: receipt, allowChangedTargets: allowChangedTargets)
+                }.value
+                selected = nil
+                reload()
+                alert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.recovery.restored")
+            } catch { report(error) }
+        }
+    }
+
+    @MainActor
+    private func report(_ error: Error) {
+        if let packageError = error as? PatchPackageError {
+            if case .restoreTargetsChanged = packageError {
+                alert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.recovery.changed_again")
+            } else {
+                alert = PatchStoreAlert(titleKey: "common.failed", messageKey: packageError.localizationKey,
+                                        messageArgument: packageError.localizationArgument)
+            }
+        } else {
+            alert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.restore")
+        }
     }
 }

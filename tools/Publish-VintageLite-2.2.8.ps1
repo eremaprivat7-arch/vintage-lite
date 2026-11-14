@@ -40,7 +40,7 @@ if ($LASTEXITCODE -ne 0 -or $origin -notmatch 'github\.com[:/]eremaprivat7-arch/
 }
 $plist = [xml](Get-Content -LiteralPath (Join-Path $repoRoot 'ThreeOneOSSix/Info.plist') -Raw)
 $versionNode = $plist.SelectSingleNode('/plist/dict/key[text()="CFBundleShortVersionString"]/following-sibling::*[1]')
-if ($versionNode.InnerText -ne '2.2.7') { throw 'Expected the VintageLite 2.2.7 release files.' }
+if ($versionNode.InnerText -ne '2.2.8') { throw 'Expected the VintageLite 2.2.8 release files.' }
 Assert-VintageReleaseFiles
 
 Push-Location -LiteralPath $serverRoot
@@ -50,7 +50,7 @@ try {
     # reseller migrations or reset licenses, bindings, balances or secrets.
     Invoke-VintageCommand -Program 'npx.cmd' -Arguments @(
         'wrangler', 'd1', 'execute', 'vintage-lite-keys', '--remote', '--yes',
-        '--file', 'migrations/0008_release_227.sql'
+        '--file', 'migrations/0009_patch_recovery_release.sql'
     )
     Invoke-VintageCommand -Program 'npx.cmd' -Arguments @('wrangler', 'deploy', '--keep-vars')
 }
@@ -62,6 +62,6 @@ Assert-VintageReleaseFiles
 Invoke-VintageCommand -Program 'git' -Arguments @(
     '-C', $repoRoot, 'push', '--atomic', 'origin',
     ($releaseCommit + ':refs/heads/main'),
-    ($releaseCommit + ':refs/tags/v2.2.7')
+    ($releaseCommit + ':refs/tags/v2.2.8')
 )
-Write-Host 'Server updated. VintageLite 2.2.7 IPA build started in GitHub Actions.'
+Write-Host 'Server updated. VintageLite 2.2.8 IPA build started in GitHub Actions.'

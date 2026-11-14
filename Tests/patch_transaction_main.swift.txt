@@ -1,0 +1,111 @@
+import Foundation
+
+enum ContainerStore {
+    static func grantContainerAccess(_ path: String) -> Int64 { -1 }
+}
+enum SandboxAccess {
+    static func release(_ handle: Int64) {}
+}
+
+var checks = 0
+func check(_ condition: Bool, _ message: String) {
+    guard condition else {
+        fputs("FAIL: \(message)\n", stderr)
+        exit(1)
+    }
+    checks += 1
+}
+
+do {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? fm.removeItem(at: root) }
+    let container = root.appendingPathComponent("Game", isDirectory: true)
+    let backups = root.appendingPathComponent("Backups", isDirectory: true)
+    let packages = root.appendingPathComponent("Packages", isDirectory: true)
+    let target = container.appendingPathComponent("Library/Caches/state.bin")
+    try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try fm.createDirectory(at: packages, withIntermediateDirectories: true)
+    let original = Data("original game data".utf8)
+    let firstBytes = Data("old boost".utf8)
+    let nextBytes = Data("new boost".utf8)
+    try original.write(to: target)
+    let package = packages.appendingPathComponent("Old.3105")
+    try Data("package fixture".utf8).write(to: package)
+    let bundleID = "com.example.game"
+    let first = PatchProject(name: "Old boost", author: "Fixture", rules: [
+        PatchRule(bundleID: bundleID, relativePath: "Library/Caches/state.bin", replacementFilename: "old.bin", replacementData: firstBytes)
+    ])
+    let next = PatchProject(name: "New boost", author: "Fixture", rules: [
+        PatchRule(bundleID: bundleID, relativePath: "Library/Caches/state.bin", replacementFilename: "new.bin", replacementData: nextBytes)
+    ])
+    let resolve: (String) throws -> URL = { id in
+        guard id == bundleID else { throw PatchPackageError.invalidBundleIdentifier }
+        return container
+    }
+    let receipt = try PatchTransaction.apply(project: first, backupRoot: backups, containerResolver: resolve)
+    try fm.removeItem(at: package)
+    var active = PatchTransaction.activeTransactions(backupRoot: backups)
+    check(active.count == 1, "a removed package remains recoverable from its journal")
+    check(active.first?.receipt == receipt, "recovery uses the original transaction receipt")
+    check(active.first?.projectName == "Old boost", "new journals retain the project title")
+    check(active.first?.bundleIDs == [bundleID], "the target app is visible in recovery")
+    check(PatchTransaction.activeTransactions(backupRoot: backups, conflictingWith: next).count == 1,
+          "the failed new patch can find its exact blocking transaction")
+    let unrelated = PatchProject(name: "Unrelated", rules: [
+        PatchRule(bundleID: bundleID, relativePath: "Library/Caches/other.bin", replacementFilename: "other.bin", replacementData: nextBytes)
+    ])
+    check(PatchTransaction.activeTransactions(backupRoot: backups, conflictingWith: unrelated).isEmpty,
+          "recovery does not suggest unrelated patches as conflicts")
+    do {
+        _ = try PatchTransaction.apply(project: next, backupRoot: backups, containerResolver: resolve)
+        check(false, "overlapping patches must not overwrite each other")
+    } catch PatchPackageError.targetOccupied(_) {}
+    let stillPatched = try Data(contentsOf: target)
+    check(stillPatched == firstBytes, "the failed apply leaves the old patch intact")
+    let inspection = try PatchTransaction.inspectRestore(receipt: receipt, containerResolver: resolve)
+    check(inspection.changedTargets.isEmpty, "unchanged replacement can be restored normally")
+    try PatchTransaction.restore(receipt: receipt, containerResolver: resolve)
+    let restored = try Data(contentsOf: target)
+    check(restored == original, "recovery restores the actual saved original")
+    check(PatchTransaction.activeTransactions(backupRoot: backups).isEmpty, "restoration removes the active lock")
+    check(PatchTransaction.appliedTargetKeys(backupRoot: backups).isEmpty, "restored journals no longer occupy files")
+    let nextReceipt = try PatchTransaction.apply(project: next, backupRoot: backups, containerResolver: resolve)
+    let nextData = try Data(contentsOf: target)
+    check(nextData == nextBytes, "the replacement patch applies after recovery")
+    try PatchTransaction.restore(receipt: nextReceipt, containerResolver: resolve)
+    let originalAgain = try Data(contentsOf: target)
+    check(originalAgain == original, "the replacement did not back up already-patched bytes as originals")
+
+    let legacy = try PatchTransaction.apply(project: first, backupRoot: backups, containerResolver: resolve)
+    var journal = try PropertyListSerialization.propertyList(from: Data(contentsOf: legacy.journalURL), format: nil) as! [String: Any]
+    journal.removeValue(forKey: "projectName")
+    journal.removeValue(forKey: "createdDirectories")
+    journal["schemaVersion"] = 1
+    journal["status"] = "prepared"
+    try PropertyListSerialization.data(fromPropertyList: journal, format: .binary, options: 0).write(to: legacy.journalURL)
+    active = PatchTransaction.activeTransactions(backupRoot: backups)
+    check(active.count == 1 && active[0].needsRecovery, "interrupted legacy journals are recoverable")
+    check(active[0].projectName == nil, "old journals without titles remain compatible")
+    try PatchTransaction.restore(receipt: legacy, containerResolver: resolve)
+    check(PatchTransaction.activeTransactions(backupRoot: backups).isEmpty, "legacy recovery clears the active state")
+
+    let changed = try PatchTransaction.apply(project: first, backupRoot: backups, containerResolver: resolve)
+    let external = Data("changed by the game later".utf8)
+    try external.write(to: target)
+    let changedInspection = try PatchTransaction.inspectRestore(receipt: changed, containerResolver: resolve)
+    check(changedInspection.changedTargets.count == 1, "later game changes require a separate confirmation")
+    do {
+        try PatchTransaction.restore(receipt: changed, containerResolver: resolve)
+        check(false, "changed files must not be overwritten without confirmation")
+    } catch PatchPackageError.restoreTargetsChanged(_) {}
+    let protected = try Data(contentsOf: target)
+    check(protected == external, "declining changed-file restore preserves current game data")
+    check(PatchTransaction.activeTransactions(backupRoot: backups).count == 1, "a refused restore keeps its recovery journal")
+    try PatchTransaction.restore(receipt: changed, allowChangedTargets: true, containerResolver: resolve)
+    check(PatchTransaction.activeTransactions(backupRoot: backups).isEmpty, "confirmed restore completes recovery")
+    print("PASS: \(checks) transaction recovery checks")
+} catch {
+    fputs("FAIL: transaction recovery · \(error)\n", stderr)
+    exit(1)
+}

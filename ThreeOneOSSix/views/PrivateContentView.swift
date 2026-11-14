@@ -14,6 +14,8 @@ struct PrivateContentView: View {
     @State private var restoreRequested = false
     @State private var confirm = false
     @State private var hasCatalog = false
+    @State private var showRecovery = false
+    @State private var recoveryWorking = false
 
     private var query: String {
         search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,10 +121,27 @@ struct PrivateContentView: View {
         .navigationTitle("VINTAGE LITE")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button { showRecovery = true } label: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                }
+                .accessibilityLabel(language.text("patch.recovery.title"))
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showCreate = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel(language.text("patch.new"))
                     .disabled(store.isBusy)
+            }
+        }
+        .sheet(isPresented: $showRecovery) {
+            NavigationStack {
+                AppliedPatchRecoveryView(store: store, isWorking: $recoveryWorking)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(language.text("common.done")) { showRecovery = false }
+                                .disabled(recoveryWorking)
+                        }
+                    }
             }
         }
         .sheet(isPresented: $showCreate) {

@@ -4,7 +4,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appLanguage) private var language
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var patchStore: PatchProjectStore
     @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
+    @State private var recoveryWorking = false
 
     var body: some View {
         NavigationStack {
@@ -62,6 +64,14 @@ struct SettingsView: View {
                     Text(language.text("settings.supported_versions_footer"))
                 }
 
+                Section {
+                    NavigationLink {
+                        AppliedPatchRecoveryView(store: patchStore, isWorking: $recoveryWorking)
+                    } label: {
+                        Label(language.text("patch.recovery.title"), systemImage: "arrow.uturn.backward.circle")
+                    }
+                }
+
                 Section("Социальные сети") {
                     creditsRow(name: "@osinxshop", role: "Telegram-канал · обновления",
                                url: "https://t.me/osinxshop")
@@ -76,6 +86,7 @@ struct SettingsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(language.text("common.done")) { dismiss() }
                         .fontWeight(.semibold)
+                        .disabled(recoveryWorking)
                 }
             }
         }

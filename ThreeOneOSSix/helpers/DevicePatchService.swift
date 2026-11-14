@@ -98,6 +98,11 @@ enum DevicePatchService {
         return PatchTransaction.latestReceipt(projectID: projectID, backupRoot: backupRoot)
     }
 
+    static func activeTransactions(conflictingWith project: PatchProject? = nil) -> [ActivePatchTransaction] {
+        guard let root = try? PatchProjectLibrary.backupRootURL() else { return [] }
+        return PatchTransaction.activeTransactions(backupRoot: root, conflictingWith: project)
+    }
+
     private static func orderedBundleIdentifiers(in project: PatchProject) -> [String] {
         project.allBundleIdentifiers
     }

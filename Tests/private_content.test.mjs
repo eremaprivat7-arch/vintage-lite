@@ -11,6 +11,7 @@ base.exec(readFileSync(new URL('../license-server/migrations/0002_patch_mode.sql
 base.exec(readFileSync(new URL('../license-server/migrations/0006_app_releases.sql',import.meta.url),'utf8'));
 base.exec(readFileSync(new URL('../license-server/migrations/0007_release_discovery.sql',import.meta.url),'utf8'));
 base.exec(readFileSync(new URL('../license-server/migrations/0008_release_227.sql',import.meta.url),'utf8'));
+base.exec(readFileSync(new URL('../license-server/migrations/0009_patch_recovery_release.sql',import.meta.url),'utf8'));
 content.exec(readFileSync(new URL('../license-server/private-content/schema.sql',import.meta.url),'utf8'));
 const encoder=new TextEncoder(),td=new TextDecoder();
 const hex=x=>Buffer.from(x).toString('hex'),b64=x=>Buffer.from(x).toString('base64');
@@ -112,11 +113,13 @@ const seeded=await releaseList(rawEnv);
 assert.ok(seeded.releases.some(r=>r.version==='2.2.5'&&r.build==='16'),'2.2.5 is present before a client reconnects');
 assert.ok(seeded.releases.some(r=>r.version==='2.2.6'&&r.build==='17'),'the hotfix is present in the admin catalog');
 assert.ok(seeded.releases.some(r=>r.version==='2.2.7'&&r.build==='18'),'the Boost update is present in the admin catalog');
-for(const [version,build] of [['2.2.5','16'],['2.2.6','17'],['2.2.7','18']]){
+assert.ok(seeded.releases.some(r=>r.version==='2.2.8'&&r.build==='19'),'the recovery update is present in the admin catalog');
+for(const [version,build] of [['2.2.5','16'],['2.2.6','17'],['2.2.7','18'],['2.2.8','19']]){
   assert.equal((await saveRelease(rawEnv,{version,build,blocked:true})).ok,true);
   await recordRelease(rawEnv,{version,build});
   base.exec(readFileSync(new URL('../license-server/migrations/0007_release_discovery.sql',import.meta.url),'utf8'));
   base.exec(readFileSync(new URL('../license-server/migrations/0008_release_227.sql',import.meta.url),'utf8'));
+  base.exec(readFileSync(new URL('../license-server/migrations/0009_patch_recovery_release.sql',import.meta.url),'utf8'));
   assert.equal((await (await statusFor(version,build)).json()).update_required,true,'discovery and migration never reopen a blocked release');
   assert.notEqual((await (await statusFor('2.2.4','15')).json()).update_required,true,'the release block leaves older versions enabled');
   const checked=await worker.fetch(new Request('https://example.test/api/check',{

@@ -1262,3 +1262,13 @@
 "patch.progress.device_access" = "正在准备设备访问…";
 "patch.error.access_initializing" = "设备访问仍在准备中。请等待设备状态完成后再应用补丁。";
 "patch.error.unsupported_device" = "此版本不支持当前 iOS 的设备访问方式。请在首页查看 iOS 版本和内部版本号。";
+
+"patch.recovery.title" = "已应用的补丁";
+"patch.recovery.open" = "打开已应用的补丁";
+"patch.recovery.description" = "应用替代补丁前，请先恢复旧补丁。即使旧补丁包已从目录移除，仍可使用已保存的原始文件进行恢复。";
+"patch.recovery.empty" = "没有活动补丁";
+"patch.recovery.previous" = "之前应用的补丁";
+"patch.recovery.pending" = "应用过程已中断，可进行恢复";
+"patch.recovery.restored" = "原始文件已恢复，现在可以应用新补丁。";
+"patch.recovery.confirm" = "请关闭目标应用。此操作会恢复已保存的原始文件，并停用所选补丁。";
+"patch.recovery.changed_again" = "检查后游戏文件再次发生变化。请重新点击恢复并查看确认信息后再继续。";

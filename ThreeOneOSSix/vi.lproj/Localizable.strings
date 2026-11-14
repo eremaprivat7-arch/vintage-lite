@@ -1262,3 +1262,13 @@
 "patch.progress.device_access" = "Đang chuẩn bị quyền truy cập thiết bị…";
 "patch.error.access_initializing" = "Đang chuẩn bị quyền truy cập thiết bị. Chờ trạng thái hoàn tất rồi áp dụng bản vá.";
 "patch.error.unsupported_device" = "Phiên bản iOS này chưa có cơ chế truy cập thiết bị được hỗ trợ trong bản dựng này. Kiểm tra phiên bản và số bản dựng iOS trên Home.";
+
+"patch.recovery.title" = "Các bản vá đang áp dụng";
+"patch.recovery.open" = "Mở các bản vá đang áp dụng";
+"patch.recovery.description" = "Khôi phục bản vá cũ trước khi áp dụng bản thay thế. Bản gốc đã lưu vẫn có thể khôi phục dù gói cũ không còn trong danh mục.";
+"patch.recovery.empty" = "Không có bản vá đang hoạt động";
+"patch.recovery.previous" = "Bản vá đã áp dụng trước đó";
+"patch.recovery.pending" = "Quá trình bị gián đoạn — có thể khôi phục";
+"patch.recovery.restored" = "Đã khôi phục bản gốc. Bạn có thể áp dụng bản vá mới.";
+"patch.recovery.confirm" = "Đóng ứng dụng đích. Thao tác này khôi phục các bản gốc đã lưu và vô hiệu hóa bản vá đã chọn.";
+"patch.recovery.changed_again" = "Tệp trò chơi đã thay đổi sau khi kiểm tra. Nhấn Khôi phục lần nữa để xem xác nhận trước khi tiếp tục.";

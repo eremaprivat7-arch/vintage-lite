@@ -8,6 +8,16 @@ struct PatchTransactionReceipt: Equatable, Identifiable {
     let journalURL: URL
 }
 
+struct ActivePatchTransaction: Identifiable {
+    let receipt: PatchTransactionReceipt
+    let projectName: String?
+    let createdAt: Date
+    let bundleIDs: [String]
+    let needsRecovery: Bool
+
+    var id: UUID { receipt.id }
+}
+
 enum PatchApplyProgress: Sendable {
     case checkingLicense
     case preparingWorkspace
@@ -68,6 +78,7 @@ enum PatchTransaction {
         let schemaVersion: Int
         let transactionID: UUID
         let projectID: UUID
+        let projectName: String?
         let createdAt: Date
         var status: Status
         let records: [Record]
@@ -281,6 +292,7 @@ enum PatchTransaction {
             schemaVersion: schemaVersion,
             transactionID: transactionID,
             projectID: project.id,
+            projectName: project.name,
             createdAt: Date(),
             status: .prepared,
             records: records,
@@ -561,6 +573,44 @@ enum PatchTransaction {
                 journalURL: $0.1
             )
         }
+    }
+
+    static func activeTransactions(
+        backupRoot: URL,
+        conflictingWith project: PatchProject? = nil,
+        fileManager: FileManager = .default
+    ) -> [ActivePatchTransaction] {
+        let requestedTargets = project.map { project in
+            Set(project.rules.map { $0.bundleID + "\0" + $0.relativePath })
+        }
+        guard let directories = try? fileManager.contentsOfDirectory(
+            at: backupRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return directories.compactMap { directory -> ActivePatchTransaction? in
+            guard let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                  values.isDirectory == true, values.isSymbolicLink != true,
+                  let projectID = UUID(uuidString: directory.lastPathComponent),
+                  let receipt = latestReceipt(projectID: projectID, backupRoot: backupRoot, fileManager: fileManager),
+                  receipt.projectID == projectID,
+                  let journal = try? activeJournal(for: receipt),
+                  let bundleIDs = try? requiredBundleIdentifiers(for: receipt) else { return nil }
+            if let project, let requestedTargets {
+                guard receipt.projectID != project.id,
+                      journal.records.contains(where: {
+                        requestedTargets.contains($0.bundleID + "\0" + $0.relativePath)
+                      }) else { return nil }
+            }
+            return ActivePatchTransaction(
+                receipt: receipt,
+                projectName: journal.projectName,
+                createdAt: journal.createdAt,
+                bundleIDs: bundleIDs,
+                needsRecovery: journal.status == .prepared
+            )
+        }.sorted { $0.createdAt > $1.createdAt }
     }
 
     static func appliedTargetKeys(
