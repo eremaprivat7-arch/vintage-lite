@@ -4,6 +4,7 @@ const digest = async value => hex(await crypto.subtle.digest('SHA-256',enc.encod
 const menu = {keyboard:[['Получить бонус','Проверить срок'],['Мой баланс','Мои ключи']],resize_keyboard:true};
 const purchaseUnavailable = 'Покупка ключей через бота отключена. Бонус и проверка срока доступны в меню.';
 const dayLabel = days => days === 1 ? '1 день' : days === 3 ? '3 дня' : days+' дней';
+const escapeHTML = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 
 async function saleKey(secret,event){
   const key = await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
@@ -55,7 +56,7 @@ async function telegram(env,method,body){
 }
 
 const money = amount => new Intl.NumberFormat('ru-RU').format(amount)+' ₸';
-const adminMenu = {keyboard:[...menu.keyboard,['Пополнить баланс','Списать с баланса'],['Статистика магазина','История баланса']],resize_keyboard:true};
+const adminMenu = {keyboard:[['🔑 Получить ключ'],...menu.keyboard,['Пополнить баланс','Списать с баланса'],['Статистика магазина','История баланса']],resize_keyboard:true};
 const userMenu = {keyboard:[...menu.keyboard,['Моя статистика']],resize_keyboard:true};
 const forceReply = {force_reply:true, selective:true};
 const amountPattern = /^[1-9]\d{0,7}$/;
@@ -99,11 +100,47 @@ async function handle(env,u){
   const msg=cb?.message ?? u.message;
   if(!msg || msg.chat.type!=='private') return;
   const uid=String((cb?.from ?? msg.from).id);
-  const admin=uid===String(env.ADMIN_ID ?? '').trim();
-  const send=(text,reply_markup=admin?adminMenu:userMenu)=>telegram(env,'sendMessage',{chat_id:uid,text,reply_markup});
+  const ownerID=String(env.ADMIN_ID ?? '').trim();
+  const admin=/^[1-9]\d{0,15}$/.test(ownerID) && uid===ownerID;
+  const send=(text,reply_markup=admin?adminMenu:userMenu,options={})=>telegram(env,'sendMessage',{...options,chat_id:uid,text,reply_markup});
+  async function showOwnerPlans(){
+    const {results}=await env.DB.prepare('SELECT days,price FROM shop_plans WHERE price IS NOT NULL ORDER BY days').all();
+    const plans=results.filter(p=>[1,3,7,15,30].includes(p.days) && Number.isSafeInteger(p.price) && p.price>0 && p.price<=99999999);
+    if(!plans.length) return send('Тарифы пока не настроены.');
+    return send('🔑 VINTAGE LITE · ключи владельца\n\nБаланс: '+money(await balance(env,uid))+'\nВыбери срок и цену ключа.',{
+      inline_keyboard:plans.map(p=>[{text:dayLabel(p.days)+' · '+money(p.price),callback_data:'buy:'+p.days+':'+p.price}])
+    });
+  }
+  async function sendOwnerKey(result){
+    const row=await env.DB.prepare('SELECT expires,lifetime,revoked,(SELECT started FROM patch_mode WHERE id=1) AS started FROM licenses WHERE digest=?').bind(await digest(result.key)).first();
+    const inactive=row && !row.revoked && row.expires===null;
+    const text=[
+      '<b>VINTAGE LITE</b>',
+      '🔑 <b>Ключ доступа</b>',
+      '',
+      '<code>'+escapeHTML(result.key)+'</code>',
+      '',
+      '🗓 Срок: <b>'+escapeHTML(dayLabel(result.days))+'</b>',
+      '⚡ Статус: <b>'+escapeHTML(inactive?'Не активирован':keyStatus(row,Math.floor(Date.now()/1000)))+'</b>',
+      '',
+      ...(inactive?['<i>Отсчёт начнётся после первой активации.</i>','']:[]),
+      'Нажми кнопку ниже, чтобы скопировать ключ.'
+    ].join('\n');
+    return send(text,{inline_keyboard:[[{text:'📋 Скопировать ключ',copy_text:{text:result.key}}]]},{parse_mode:'HTML'});
+  }
   if(cb){
     await telegram(env,'answerCallbackQuery',{callback_query_id:cb.id}).catch(()=>{});
     if(/^buy:/.test(cb.data ?? '')){
+      if(admin){
+        const selected=/^buy:(1|3|7|15|30):([1-9]\d{0,7})$/.exec(cb.data);
+        if(!selected) return send('Открой «🔑 Получить ключ» и выбери актуальный тариф.');
+        const result=await purchase(env,uid,Number(selected[1]),'tg:'+uid+':'+msg.message_id,Number(selected[2]));
+        if(result.error) return send(result.error);
+        await telegram(env,'editMessageReplyMarkup',{
+          chat_id:msg.chat.id,message_id:msg.message_id,reply_markup:{inline_keyboard:[]}
+        }).catch(()=>{});
+        return sendOwnerKey(result);
+      }
       // Old catalog messages must not create orders or keep showing tariffs
       // after their buttons are pressed. Refresh the cached reply keyboard too.
       await telegram(env,'editMessageText',{
@@ -118,8 +155,10 @@ async function handle(env,u){
   }
   const t=(msg.text ?? '').trim();
   const prompt=msg.reply_to_message?.from?.is_bot ? (msg.reply_to_message.text ?? '') : '';
-  if(/^(Купить ключ|Цены|Тарифы)$/i.test(t) || /^\/(buy|purchase|prices|price)(?:@\w+)?(?:\s|$)/i.test(t))
-    return send(purchaseUnavailable);
+  if(/^(?:🔑\s*)?(Купить ключ|Получить ключ|Цены|Тарифы)$/i.test(t) || /^\/(buy|purchase|prices|price)(?:@\w+)?(?:\s|$)/i.test(t)){
+    if(!admin) return send(purchaseUnavailable);
+    return showOwnerPlans();
+  }
   if(t==='Моя статистика') return send(await statistics(env,uid));
   if(admin && t==='Статистика магазина') return send(await statistics(env,null));
   if(admin && t==='История баланса'){
@@ -169,7 +208,7 @@ async function handle(env,u){
   }
   if(!admin && /^\/(?:admin|balance)/i.test(t))
     return send('Для этого действия нужен администратор. Твой Telegram ID: '+uid+'. Владелец может сверить его с ADMIN_ID в Cloudflare.');
-  return send('Vintage Lite\nБаланс: '+money(await balance(env,uid))+'\nТвой Telegram ID: '+uid+'\n'+(admin?'Меню администратора. Для пополнения нажми «Пополнить баланс».':'Для бонуса пришли свой личный ключ. Для проверки нажми «Проверить срок».'));
+  return send('Vintage Lite\nБаланс: '+money(await balance(env,uid))+'\nТвой Telegram ID: '+uid+'\n'+(admin?'Меню владельца. Для ключа нажми «🔑 Получить ключ».':'Для бонуса пришли свой личный ключ. Для проверки нажми «Проверить срок».'));
 }
 
 export default {async fetch(req,env){
