@@ -33,6 +33,7 @@ jobs:
           bash Tests/check_bundled_packages.sh
           bash Tests/run_patch_transaction_tests.sh
           node --experimental-sqlite Tests/private_content.test.mjs
+          node --experimental-sqlite Tests/bonus_bot.test.mjs
           bash Tests/run_policy_tests.sh
 
       - name: Build VintageLite for iPhone

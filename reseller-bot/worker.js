@@ -1,8 +1,8 @@
 const enc = new TextEncoder();
 const hex = data => Array.from(new Uint8Array(data), b => b.toString(16).padStart(2,'0')).join('');
 const digest = async value => hex(await crypto.subtle.digest('SHA-256',enc.encode(value)));
-const retail = {1:250,3:700,7:1500,15:3500,30:5000};
-const menu = {keyboard:[['Купить ключ','Мой баланс'],['Получить бонус','Мои ключи'],['Проверить срок']],resize_keyboard:true};
+const menu = {keyboard:[['Получить бонус','Проверить срок'],['Мой баланс','Мои ключи']],resize_keyboard:true};
+const purchaseUnavailable = 'Покупка ключей через бота отключена. Бонус и проверка срока доступны в меню.';
 const dayLabel = days => days === 1 ? '1 день' : days === 3 ? '3 дня' : days+' дней';
 
 async function saleKey(secret,event){
@@ -82,13 +82,13 @@ async function statistics(env,uid){
     return uid?stmt.bind(uid):stmt;
   }
   const [orders,bonuses,adjustments]=await env.DB.batch([
-    query('SELECT COUNT(*) AS count, COALESCE(SUM(cost),0) AS total, COUNT(DISTINCT uid) AS buyers FROM shop_orders'),
+    query('SELECT COUNT(*) AS count, COUNT(DISTINCT uid) AS buyers FROM shop_orders'),
     query('SELECT COALESCE(SUM(cash),0) AS total FROM shop_bonus'),
     query('SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END),0) AS added, COALESCE(SUM(CASE WHEN delta<0 THEN -delta ELSE 0 END),0) AS removed FROM shop_adjust')
   ]);
   const sales=orders.results[0], wallet=adjustments.results[0];
   return [uid?'Моя статистика · за всё время':'Магазин · за всё время',
-    'Куплено ключей: '+sales.count,'Сумма покупок: '+money(sales.total),
+    'Куплено ключей: '+sales.count,
     ...uid?[]:['Покупателей: '+sales.buyers],
     'Ручные пополнения: '+money(wallet.added),'Ручные списания: '+money(wallet.removed),
     'Начислено бонусов: '+money(bonuses.results[0].total)].join('\n');
@@ -103,15 +103,23 @@ async function handle(env,u){
   const send=(text,reply_markup=admin?adminMenu:userMenu)=>telegram(env,'sendMessage',{chat_id:uid,text,reply_markup});
   if(cb){
     await telegram(env,'answerCallbackQuery',{callback_query_id:cb.id}).catch(()=>{});
+    if(/^buy:/.test(cb.data ?? '')){
+      // Old catalog messages must not create orders or keep showing tariffs
+      // after their buttons are pressed. Refresh the cached reply keyboard too.
+      await telegram(env,'editMessageText',{
+        chat_id:msg.chat.id,message_id:msg.message_id,text:purchaseUnavailable,
+        reply_markup:{inline_keyboard:[]}
+      }).catch(()=>{});
+      return send(purchaseUnavailable);
+    }
     const change=/^adjust:(\d{1,16}):(-?[1-9]\d{0,7})$/.exec(cb.data);
     if(change && admin) return send(await adjustBalance(env,'confirm:'+uid+':'+msg.message_id,change[1],Number(change[2])));
-    const m=/^buy:(\d+):(\d+)$/.exec(cb.data);
-    if(!m) return;
-    const result=await purchase(env,uid,+m[1],'tg:'+uid+':'+msg.message_id,+m[2]);
-    return send(result.error ?? ('Твой ключ на '+dayLabel(result.days)+'\n'+result.key+'\nСписано '+result.cost+' ₸'));
+    return;
   }
   const t=(msg.text ?? '').trim();
   const prompt=msg.reply_to_message?.from?.is_bot ? (msg.reply_to_message.text ?? '') : '';
+  if(/^(Купить ключ|Цены|Тарифы)$/i.test(t) || /^\/(buy|purchase|prices|price)(?:@\w+)?(?:\s|$)/i.test(t))
+    return send(purchaseUnavailable);
   if(t==='Моя статистика') return send(await statistics(env,uid));
   if(admin && t==='Статистика магазина') return send(await statistics(env,null));
   if(admin && t==='История баланса'){
@@ -132,11 +140,6 @@ async function handle(env,u){
     const delta=Number(digits)*(target[1]==='Пополнить баланс'?1:-1);
     return send(target[1]+' на '+money(Math.abs(delta))+'?\nTelegram ID: '+target[2]+'\nСейчас на балансе: '+money(await balance(env,target[2])),{inline_keyboard:[[{text:'Подтвердить',callback_data:'adjust:'+target[2]+':'+delta}]]});
   }
-  if(t==='Купить ключ'){
-    const {results}=await env.DB.prepare('SELECT * FROM shop_plans WHERE price IS NOT NULL ORDER BY days').all();
-    if(!results.length) return send('Цены пока не установлены.');
-    return send(['Срок · закупка / розница / доход', ...results.map(p => dayLabel(p.days)+' · '+p.price+' / '+retail[p.days]+' / '+(retail[p.days]-p.price)+' ₸'), 'Выбери тариф, чтобы купить по закупочной цене.'].join('\n'),{inline_keyboard:results.map(p=>[{text:dayLabel(p.days)+' · '+p.price+' ₸',callback_data:'buy:'+p.days+':'+p.price}])});
-  }
   const statusPrompt='Ответь на это сообщение ключом VL-…, чтобы проверить оставшееся время.';
   if(t==='Проверить срок') return send(statusPrompt,forceReply);
   if(prompt===statusPrompt){
@@ -156,11 +159,6 @@ async function handle(env,u){
     return send(lines.join('\n') || 'Покупок пока нет.');
   }
   if(admin){
-    const price=/^\/price (1|3|7|15|30) ([1-9]\d{0,7})$/.exec(t);
-    if(price){
-      const r=await env.DB.prepare('UPDATE shop_plans SET price=? WHERE days=? AND cash<?').bind(+price[2],+price[1],+price[2]).run();
-      return send(r.meta.changes?'Цена сохранена.':'Цена должна превышать денежный бонус.');
-    }
     const adjust=/^\/balance(?:@\w+)?\s+([1-9]\d{0,15})\s+([+-]?[\d\s]+)(?:\s*₸)?$/i.exec(t);
     if(adjust){
       const delta=Number(adjust[2].replace(/\s/g,''));
@@ -169,9 +167,9 @@ async function handle(env,u){
     }
     if(/^\/balance/i.test(t)) return send('Нажми «Пополнить баланс» или введи /balance 123456789 +1000');
   }
-  if(!admin && /^\/(?:admin|balance|price)/i.test(t))
+  if(!admin && /^\/(?:admin|balance)/i.test(t))
     return send('Для этого действия нужен администратор. Твой Telegram ID: '+uid+'. Владелец может сверить его с ADMIN_ID в Cloudflare.');
-  return send('Vintage Lite\nБаланс: '+money(await balance(env,uid))+'\nТвой Telegram ID: '+uid+'\n'+(admin?'Меню администратора. Для пополнения нажми «Пополнить баланс».':'Для пополнения передай свой ID администратору. Для покупки нажми «Купить ключ».'));
+  return send('Vintage Lite\nБаланс: '+money(await balance(env,uid))+'\nТвой Telegram ID: '+uid+'\n'+(admin?'Меню администратора. Для пополнения нажми «Пополнить баланс».':'Для бонуса пришли свой личный ключ. Для проверки нажми «Проверить срок».'));
 }
 
 export default {async fetch(req,env){

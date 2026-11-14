@@ -22,7 +22,7 @@ function Assert-VintageReleaseFiles {
     if ($LASTEXITCODE -ne 0 -or $currentHead -ne $releaseCommit) {
         throw 'The release checkout changed during publication. Publication stopped.'
     }
-    & git -C $repoRoot diff --quiet HEAD -- ThreeOneOSFive/Patches ThreeOneOSSix license-server tools
+    & git -C $repoRoot diff --quiet HEAD -- ThreeOneOSFive/Patches ThreeOneOSSix ThreeOneOSSix.xcodeproj license-server reseller-bot tools
     if ($LASTEXITCODE -ne 0) {
         throw 'Release files changed. Upload the current Patches folder and prepare a new release bundle.'
     }
@@ -40,7 +40,7 @@ if ($LASTEXITCODE -ne 0 -or $origin -notmatch 'github\.com[:/]eremaprivat7-arch/
 }
 $plist = [xml](Get-Content -LiteralPath (Join-Path $repoRoot 'ThreeOneOSSix/Info.plist') -Raw)
 $versionNode = $plist.SelectSingleNode('/plist/dict/key[text()="CFBundleShortVersionString"]/following-sibling::*[1]')
-if ($versionNode.InnerText -ne '2.2.8') { throw 'Expected the VintageLite 2.2.8 release files.' }
+if ($versionNode.InnerText -ne '2.2.9') { throw 'Expected the VintageLite 2.2.9 release files.' }
 Assert-VintageReleaseFiles
 
 Push-Location -LiteralPath $serverRoot
@@ -50,9 +50,13 @@ try {
     # reseller migrations or reset licenses, bindings, balances or secrets.
     Invoke-VintageCommand -Program 'npx.cmd' -Arguments @(
         'wrangler', 'd1', 'execute', 'vintage-lite-keys', '--remote', '--yes',
-        '--file', 'migrations/0009_patch_recovery_release.sql'
+        '--file', 'migrations/0010_status_channel_release.sql'
     )
     Invoke-VintageCommand -Program 'npx.cmd' -Arguments @('wrangler', 'deploy', '--keep-vars')
+    Assert-VintageReleaseFiles
+    Invoke-VintageCommand -Program 'npx.cmd' -Arguments @(
+        'wrangler', 'deploy', '--config', '../reseller-bot/wrangler.jsonc', '--keep-vars'
+    )
 }
 finally {
     Pop-Location
@@ -62,6 +66,6 @@ Assert-VintageReleaseFiles
 Invoke-VintageCommand -Program 'git' -Arguments @(
     '-C', $repoRoot, 'push', '--atomic', 'origin',
     ($releaseCommit + ':refs/heads/main'),
-    ($releaseCommit + ':refs/tags/v2.2.8')
+    ($releaseCommit + ':refs/tags/v2.2.9')
 )
-Write-Host 'Server updated. VintageLite 2.2.8 IPA build started in GitHub Actions.'
+Write-Host 'License server and bonus bot updated. VintageLite 2.2.9 IPA build started in GitHub Actions.'

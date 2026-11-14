@@ -16,7 +16,7 @@ struct ThreeOneOSSixApp: App {
     init() {
         setupLogCapture()
         SandboxAccess.prepare()
-        log("app: VintageLite 2.2.8 launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
+        log("app: VintageLite 2.2.9 launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
     }
 
     private var language: AppLanguage {
@@ -293,11 +293,11 @@ enum VintageRelease {
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "AppReleaseDisplayVersion") as? String
-            ?? "2.2.8"
+            ?? "2.2.9"
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "19"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "20"
     }
 }
 
@@ -318,8 +318,8 @@ private struct ReleaseBlockedView: View {
                  : "В приложении идут работы. Информация об обновлении — в нашем Telegram-канале.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-            Link("Скачать новую версию · @osinxshop",
-                 destination: URL(string: "https://t.me/osinxshop")!)
+            Link("Скачать новую версию · @VintageLiteStatus",
+                 destination: URL(string: "https://t.me/VintageLiteStatus")!)
                 .buttonStyle(.borderedProminent)
                 .tint(.white)
                 .foregroundStyle(.black)
@@ -333,13 +333,6 @@ private struct ReleaseBlockedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
-    }
-}
-
-private struct PurchaseContact: View {
-    var body: some View {
-        Link("По покупке ключа · @osinxff", destination: URL(string: "https://t.me/osinxff")!)
-        Link("Telegram-канал · @osinxshop", destination: URL(string: "https://t.me/osinxshop")!)
     }
 }
 
@@ -396,8 +389,6 @@ struct LicenseAccountView: View {
                             copied = true
                         }
                         Link("Получить бонус", destination: URL(string: "https://t.me/vintagelite_bot")!)
-                        Divider()
-                        PurchaseContact()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(20)
                     .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))

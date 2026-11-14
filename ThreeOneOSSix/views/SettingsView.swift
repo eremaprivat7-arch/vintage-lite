@@ -73,10 +73,8 @@ struct SettingsView: View {
                 }
 
                 Section("Социальные сети") {
-                    creditsRow(name: "@osinxshop", role: "Telegram-канал · обновления",
-                               url: "https://t.me/osinxshop")
-                    creditsRow(name: "@osinxff", role: "Поддержка и покупка ключа",
-                               url: "https://t.me/osinxff")
+                    creditsRow(name: "@VintageLiteStatus", role: "Telegram-канал · обновления",
+                               url: "https://t.me/VintageLiteStatus")
                 }
             }
             .tint(AppTheme.accent)

@@ -32,7 +32,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.2.8</string>
+	<string>2.2.9</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -46,13 +46,13 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>19</string>
+	<string>20</string>
 	<key>LicenseServerURL</key>
 	<string>https://vintage-lite-license.vintage-lite-keys.workers.dev</string>
 	<key>RemotePatchCatalogEnabled</key>
 	<false/>
 	<key>TelegramChannelURL</key>
-	<string>https://t.me/osinxshop</string>
+	<string>https://t.me/VintageLiteStatus</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
