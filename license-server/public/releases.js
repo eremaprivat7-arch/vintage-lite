@@ -12,8 +12,8 @@ function createReleaseControls(root, api) {
         <tbody></tbody>
       </table></div>
       <form class="release-form">
-        <label>Версия<input name="version" placeholder="2.2.6" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
-        <label>Сборка<input name="build" placeholder="17" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
+        <label>Версия<input name="version" placeholder="2.2.7" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
+        <label>Сборка<input name="build" placeholder="18" required pattern="[0-9]+(\\.[0-9]+){0,3}"></label>
         <label>Вход<select name="state"><option value="allow">Открыт</option><option value="block">Закрыт, требуется обновление</option></select></label>
         <button class="primary">Добавить или сохранить</button>
       </form>
