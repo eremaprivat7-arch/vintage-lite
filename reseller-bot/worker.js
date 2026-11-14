@@ -2,22 +2,39 @@ const enc = new TextEncoder();
 const hex = data => Array.from(new Uint8Array(data), b => b.toString(16).padStart(2,'0')).join('');
 const digest = async value => hex(await crypto.subtle.digest('SHA-256',enc.encode(value)));
 const menu = {keyboard:[['Получить бонус','Проверить срок'],['Мой баланс','Мои ключи']],resize_keyboard:true};
-const purchaseUnavailable = 'Покупка ключей через бота отключена. Бонус и проверка срока доступны в меню.';
+const purchaseUnavailable = 'Покупка ключей доступна владельцу и реселлерам, добавленным администратором. Бонус и проверка срока доступны в меню.';
+const telegramPrices = Object.freeze({1:250,3:700,7:1500,15:3500,30:5000});
 const dayLabel = days => days === 1 ? '1 день' : days === 3 ? '3 дня' : days+' дней';
 const escapeHTML = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+const isOwner = (env,uid) => {
+  const ownerID=String(env.ADMIN_ID ?? '').trim();
+  return /^[1-9]\d{0,15}$/.test(ownerID) && uid===ownerID;
+};
 
 async function saleKey(secret,event){
   const key = await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   return 'VL-'+hex(await crypto.subtle.sign('HMAC',key,enc.encode(event))).slice(0,32).toUpperCase();
 }
 
-async function purchase(env,uid,days,event,price){
+async function purchase(env,uid,days,event,price,fromTelegram=false){
   const key = await saleKey(env.KEY_SECRET,event);
   const hash = await digest(key);
   try {
-    await env.DB.prepare(`INSERT INTO shop_orders(event,uid,days,cost,digest)
-      SELECT ?,?,days,price,? FROM shop_plans WHERE days=? AND price=?
-      ON CONFLICT(event) DO NOTHING`).bind(event,uid,hash,days,price).run();
+    if(fromTelegram){
+      const standardPrice=telegramPrices[days];
+      if(!Number.isSafeInteger(standardPrice)) return {error:'Выбери актуальный тариф.'};
+      // Recheck membership in the same statement that creates the order, so
+      // revocation during a callback cannot authorize a new purchase.
+      await env.DB.prepare(`INSERT INTO shop_orders(event,uid,days,cost,digest)
+        SELECT ?,?,days,?,? FROM shop_plans
+        WHERE days=? AND ?=? AND (?=1 OR EXISTS(
+          SELECT 1 FROM reseller_access WHERE uid=? AND token_hash IS NOT NULL
+        )) ON CONFLICT(event) DO NOTHING`).bind(event,uid,standardPrice,hash,days,standardPrice,price,Number(isOwner(env,uid)),uid).run();
+    }else{
+      await env.DB.prepare(`INSERT INTO shop_orders(event,uid,days,cost,digest)
+        SELECT ?,?,days,price,? FROM shop_plans WHERE days=? AND price=?
+        ON CONFLICT(event) DO NOTHING`).bind(event,uid,hash,days,price).run();
+    }
   } catch(e){
     if(String(e).includes('low_balance')) return {error:'Недостаточно средств.'};
     throw e;
@@ -58,6 +75,7 @@ async function telegram(env,method,body){
 const money = amount => new Intl.NumberFormat('ru-RU').format(amount)+' ₸';
 const adminMenu = {keyboard:[['🔑 Получить ключ'],...menu.keyboard,['Пополнить баланс','Списать с баланса'],['Статистика магазина','История баланса']],resize_keyboard:true};
 const userMenu = {keyboard:[...menu.keyboard,['Моя статистика']],resize_keyboard:true};
+const resellerMenu = {keyboard:[['🔑 Получить ключ'],...userMenu.keyboard],resize_keyboard:true};
 const forceReply = {force_reply:true, selective:true};
 const amountPattern = /^[1-9]\d{0,7}$/;
 
@@ -100,18 +118,18 @@ async function handle(env,u){
   const msg=cb?.message ?? u.message;
   if(!msg || msg.chat.type!=='private') return;
   const uid=String((cb?.from ?? msg.from).id);
-  const ownerID=String(env.ADMIN_ID ?? '').trim();
-  const admin=/^[1-9]\d{0,15}$/.test(ownerID) && uid===ownerID;
-  const send=(text,reply_markup=admin?adminMenu:userMenu,options={})=>telegram(env,'sendMessage',{...options,chat_id:uid,text,reply_markup});
-  async function showOwnerPlans(){
-    const {results}=await env.DB.prepare('SELECT days,price FROM shop_plans WHERE price IS NOT NULL ORDER BY days').all();
-    const plans=results.filter(p=>[1,3,7,15,30].includes(p.days) && Number.isSafeInteger(p.price) && p.price>0 && p.price<=99999999);
+  const admin=isOwner(env,uid);
+  const canPurchase=admin || !!(await env.DB.prepare('SELECT uid FROM reseller_access WHERE uid=? AND token_hash IS NOT NULL').bind(uid).first());
+  const send=(text,reply_markup=admin?adminMenu:canPurchase?resellerMenu:userMenu,options={})=>telegram(env,'sendMessage',{...options,chat_id:uid,text,reply_markup});
+  async function showPurchasePlans(){
+    const {results}=await env.DB.prepare('SELECT days FROM shop_plans ORDER BY days').all();
+    const plans=results.filter(p=>Number.isSafeInteger(telegramPrices[p.days])).map(p=>({days:p.days,price:telegramPrices[p.days]}));
     if(!plans.length) return send('Тарифы пока не настроены.');
-    return send('🔑 VINTAGE LITE · ключи владельца\n\nБаланс: '+money(await balance(env,uid))+'\nВыбери срок и цену ключа.',{
+    return send('🔑 VINTAGE LITE · ключи доступа\n\nБаланс: '+money(await balance(env,uid))+'\nВыбери срок и цену ключа.',{
       inline_keyboard:plans.map(p=>[{text:dayLabel(p.days)+' · '+money(p.price),callback_data:'buy:'+p.days+':'+p.price}])
     });
   }
-  async function sendOwnerKey(result){
+  async function sendKey(result){
     const row=await env.DB.prepare('SELECT expires,lifetime,revoked,(SELECT started FROM patch_mode WHERE id=1) AS started FROM licenses WHERE digest=?').bind(await digest(result.key)).first();
     const inactive=row && !row.revoked && row.expires===null;
     const text=[
@@ -131,15 +149,15 @@ async function handle(env,u){
   if(cb){
     await telegram(env,'answerCallbackQuery',{callback_query_id:cb.id}).catch(()=>{});
     if(/^buy:/.test(cb.data ?? '')){
-      if(admin){
+      if(canPurchase){
         const selected=/^buy:(1|3|7|15|30):([1-9]\d{0,7})$/.exec(cb.data);
         if(!selected) return send('Открой «🔑 Получить ключ» и выбери актуальный тариф.');
-        const result=await purchase(env,uid,Number(selected[1]),'tg:'+uid+':'+msg.message_id,Number(selected[2]));
+        const result=await purchase(env,uid,Number(selected[1]),'tg:'+uid+':'+msg.message_id,Number(selected[2]),true);
         if(result.error) return send(result.error);
         await telegram(env,'editMessageReplyMarkup',{
           chat_id:msg.chat.id,message_id:msg.message_id,reply_markup:{inline_keyboard:[]}
         }).catch(()=>{});
-        return sendOwnerKey(result);
+        return sendKey(result);
       }
       // Old catalog messages must not create orders or keep showing tariffs
       // after their buttons are pressed. Refresh the cached reply keyboard too.
@@ -156,8 +174,8 @@ async function handle(env,u){
   const t=(msg.text ?? '').trim();
   const prompt=msg.reply_to_message?.from?.is_bot ? (msg.reply_to_message.text ?? '') : '';
   if(/^(?:🔑\s*)?(Купить ключ|Получить ключ|Цены|Тарифы)$/i.test(t) || /^\/(buy|purchase|prices|price)(?:@\w+)?(?:\s|$)/i.test(t)){
-    if(!admin) return send(purchaseUnavailable);
-    return showOwnerPlans();
+    if(!canPurchase) return send(purchaseUnavailable);
+    return showPurchasePlans();
   }
   if(t==='Моя статистика') return send(await statistics(env,uid));
   if(admin && t==='Статистика магазина') return send(await statistics(env,null));
@@ -208,7 +226,7 @@ async function handle(env,u){
   }
   if(!admin && /^\/(?:admin|balance)/i.test(t))
     return send('Для этого действия нужен администратор. Твой Telegram ID: '+uid+'. Владелец может сверить его с ADMIN_ID в Cloudflare.');
-  return send('Vintage Lite\nБаланс: '+money(await balance(env,uid))+'\nТвой Telegram ID: '+uid+'\n'+(admin?'Меню владельца. Для ключа нажми «🔑 Получить ключ».':'Для бонуса пришли свой личный ключ. Для проверки нажми «Проверить срок».'));
+  return send('Vintage Lite\nБаланс: '+money(await balance(env,uid))+'\nТвой Telegram ID: '+uid+'\n'+(admin?'Меню владельца. Для ключа нажми «🔑 Получить ключ».':canPurchase?'Меню реселлера. Для ключа нажми «🔑 Получить ключ».':'Для бонуса пришли свой личный ключ. Для проверки нажми «Проверить срок».'));
 }
 
 export default {async fetch(req,env){

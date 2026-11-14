@@ -19,7 +19,7 @@ function Assert-VintageBotFiles {
     $currentHead = (& git -C $repoRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $currentHead -ne $updateCommit) { throw 'The update checkout changed.' }
     & git -C $repoRoot diff --quiet HEAD --
-    if ($LASTEXITCODE -ne 0) { throw 'Use the clean owner-bot update checkout.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Use the clean reseller-bot update checkout.' }
 }
 
 $updateCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
@@ -37,7 +37,7 @@ Invoke-VintageCommand -Program 'git' -Arguments @('-C', $repoRoot, 'fetch', 'ori
 & git -C $repoRoot merge-base --is-ancestor FETCH_HEAD $updateCommit
 if ($LASTEXITCODE -ne 0) { throw 'Main changed since this update was prepared. Update stopped before deployment.' }
 
-Invoke-VintageCommand -Program 'node' -Arguments @('--experimental-sqlite', (Join-Path $repoRoot 'Tests/bonus_bot.test.mjs'))
+Invoke-VintageCommand -Program 'node' -Arguments @('--no-warnings', '--experimental-sqlite', (Join-Path $repoRoot 'Tests/bonus_bot.test.mjs'))
 Push-Location -LiteralPath $serverRoot
 try {
     Invoke-VintageCommand -Program 'npm.cmd' -Arguments @('ci', '--no-audit', '--no-fund')
@@ -52,4 +52,4 @@ finally { Pop-Location }
 
 Assert-VintageBotFiles
 Invoke-VintageCommand -Program 'git' -Arguments @('-C', $repoRoot, 'push', 'origin', ($updateCommit + ':refs/heads/main'))
-Write-Host 'Owner-only bot purchases updated. Send /start to refresh your menu.'
+Write-Host 'Approved reseller bot purchases updated. Send /start to refresh your menu.'
