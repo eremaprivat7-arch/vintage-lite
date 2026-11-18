@@ -121,6 +121,11 @@ enum PatchProjectLibrary {
             do {
                 let data = try readPackage(at: url)
                 let summary = try PatchPackageCodec.inspect(data)
+                // The current built-in catalog takes precedence over an older import.
+                // Keep the local file and its recovery history untouched.
+                if !isBundled, byID[summary.packageID]?.isBundled == true {
+                    continue
+                }
                 let decoded: DecodedPatchPackage?
                 if isBundled && summary.isPasswordProtected {
                     if let key = try? PatchKeyStore.load(for: summary),

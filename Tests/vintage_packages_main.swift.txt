@@ -18,8 +18,8 @@ for case let url as URL in files where ["3105", "3106"].contains(url.pathExtensi
             precondition(decoded.project.id == summary.packageID)
             if url.deletingLastPathComponent().lastPathComponent == "FPSBoost" {
                 let requiredNames = [
-                    "AIM BODY (8).3105": "BODY VINTAGE",
-                    "DRAG VINTAGE (2).3105": "DRAG VINTAGE",
+                    "BODY VINTAGELT.3105": "BODY VINTAGE",
+                    "DRAG VINTAGE.3105": "DRAG VINTAGE",
                     "NECK VINTAGE.3105": "NECK VINTAGE"
                 ]
                 if let expected = requiredNames[url.lastPathComponent] {
