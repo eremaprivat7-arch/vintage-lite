@@ -44,7 +44,7 @@ struct PrivateContentView: View {
     private var matchingLocal: [PatchLibraryItem] {
         guard !query.isEmpty else { return localItems }
         return localItems.filter { item in
-            let fields = [item.project?.name, item.packageURL.lastPathComponent].compactMap { $0 }
+            let fields = [item.displayName, item.project?.name, item.packageURL.lastPathComponent].compactMap { $0 }
             return fields.contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
@@ -211,7 +211,7 @@ struct PrivateContentView: View {
 
     @ViewBuilder
     private func localRow(_ item: PatchLibraryItem) -> some View {
-        let name = item.project?.name ?? item.packageURL.deletingPathExtension().lastPathComponent
+        let name = item.displayName
         if item.isLocked {
             Button { store.requestUnlock(for: item) } label: {
                 fileRow(title: name, subtitle: language.text("patch.tap_to_unlock"), icon: "lock.fill")

@@ -40,6 +40,7 @@ struct PatchProjectsView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return store.items }
         return store.items.filter { item in
+            if item.displayName.localizedCaseInsensitiveContains(query) { return true }
             if item.packageURL.lastPathComponent.localizedCaseInsensitiveContains(query) {
                 return true
             }
@@ -499,7 +500,7 @@ private struct PatchProjectRow: View {
         HStack(spacing: 12) {
             AppRowIcon(systemName: item.isLocked ? "lock.doc.fill" : "shippingbox.fill")
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.project?.name ?? language.text("patch.locked_project"))
+                Text(item.displayName)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -656,16 +657,53 @@ extension View {
     }
 }
 
+private struct VintagePatchToggleStyle: ToggleStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 14) {
+                configuration.label
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 12)
+                Text(configuration.isOn ? "ON" : "OFF")
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(configuration.isOn ? Color.white : Color.white.opacity(0.45))
+                    .frame(width: 32)
+                Capsule()
+                    .fill(configuration.isOn ? Color.white : Color(white: 0.24))
+                    .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                        Capsule()
+                            .fill(.white)
+                            .overlay(Capsule().stroke(.black.opacity(0.07), lineWidth: 0.5))
+                            .shadow(color: .black.opacity(0.16), radius: 2, y: 1)
+                            .frame(width: 46, height: 30)
+                            .padding(4)
+                    }
+                    .frame(width: 84, height: 38)
+                    .accessibilityHidden(true)
+            }
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(Text(configuration.isOn ? "ON" : "OFF"))
+        .accessibilityAddTraits(configuration.isOn ? .isSelected : [])
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: configuration.isOn)
+    }
+}
+
 struct PatchProjectDetailView: View {
     @EnvironmentObject private var license: LicenseSession
     @EnvironmentObject private var appState: AppState
     @Environment(\.appLanguage) private var language
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var store: PatchProjectStore
     let projectID: UUID
     @State private var showEditor = false
     @State private var editingRule: PatchRule?
-    @State private var showApplyConfirmation = false
-    @State private var showRestoreConfirmation = false
     @State private var showChangedRestoreConfirmation = false
     @State private var restoreChangedPaths: [String] = []
     @State private var isWorking = false
@@ -675,13 +713,10 @@ struct PatchProjectDetailView: View {
     @State private var actionAlert: PatchStoreAlert?
     @State private var showRecovery = false
     @State private var recoveryWorking = false
+    @State private var receipt: PatchTransactionReceipt?
 
     private var item: PatchLibraryItem? {
         store.items.first(where: { $0.id == projectID })
-    }
-
-    private var receipt: PatchTransactionReceipt? {
-        DevicePatchService.latestReceipt(projectID: projectID)
     }
 
     private var isWorkspaceProject: Bool {
@@ -728,7 +763,7 @@ struct PatchProjectDetailView: View {
                             NavigationLink {
                                 FileBrowserView(
                                     containerPath: workspaceURL.path,
-                                    title: project.name,
+                                    title: item.displayName,
                                     bundleID: nil
                                 )
                             } label: {
@@ -781,24 +816,20 @@ struct PatchProjectDetailView: View {
                 }
 
                 Section {
-                    Button {
-                        showApplyConfirmation = true
-                    } label: {
-                        actionLabel(receipt == nil ? "patch.apply" : "patch.status.applied",
-                                    systemImage: "bolt.fill")
-                            .font(.headline.weight(.bold)).foregroundStyle(.black)
-                            .padding(.horizontal, 16).padding(.vertical, 14)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+                    Toggle(isOn: Binding(
+                        get: { receipt != nil },
+                        set: { setPatchEnabled($0) }
+                    )) {
+                        Text(language.text("patch.toggle.title"))
+                            .font(.headline)
                     }
-                    .disabled(isWorking || receipt != nil || appState.kernelExploitRunning)
+                    .toggleStyle(VintagePatchToggleStyle())
+                    .disabled(isWorking || store.isBusy || store.isPatchOperationRunning || appState.kernelExploitRunning)
+                    .accessibilityIdentifier("patch.power")
+                    .accessibilityHint(language.text("patch.toggle.hint"))
 
-                    if receipt != nil {
-                        Button(role: .destructive) {
-                            showRestoreConfirmation = true
-                        } label: {
-                            actionLabel("patch.restore", systemImage: "arrow.uturn.backward.circle")
-                        }
-                        .disabled(isWorking || appState.kernelExploitRunning)
+                    if store.isPatchOperationRunning && !isWorking {
+                        ProgressView(language.text("patch.toggle.busy"))
                     }
 
                     if appState.kernelExploitRunning && !isWorking {
@@ -817,13 +848,22 @@ struct PatchProjectDetailView: View {
                     }
 
                 } footer: {
-                    Text(language.text("patch.apply_footer"))
+                    Text(language.text("patch.toggle.hint"))
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(item?.project?.name ?? language.text("patch.title"))
+        .navigationTitle(item?.displayName ?? language.text("patch.title"))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isWorking)
+        .interactiveDismissDisabled(isWorking)
+        .onAppear(perform: refreshReceipt)
+        .onChange(of: store.isPatchOperationRunning) { running in
+            if !running { refreshReceipt() }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active && !store.isPatchOperationRunning { refreshReceipt() }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if isWorking {
@@ -861,26 +901,6 @@ struct PatchProjectDetailView: View {
             }
         }
         .confirmationDialog(
-            language.text("patch.apply_confirm_title"),
-            isPresented: $showApplyConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(language.text("patch.apply")) { apply() }
-            Button(language.text("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(language.text("patch.apply_confirm_message"))
-        }
-        .confirmationDialog(
-            language.text("patch.restore_confirm_title"),
-            isPresented: $showRestoreConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(language.text("patch.restore"), role: .destructive) { prepareRestore() }
-            Button(language.text("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(language.text("patch.restore_confirm_message"))
-        }
-        .confirmationDialog(
             language.text("patch.restore_changed_title"),
             isPresented: $showChangedRestoreConfirmation,
             titleVisibility: .visible
@@ -909,9 +929,16 @@ struct PatchProjectDetailView: View {
         }
     }
 
-    private func actionLabel(_ key: String, systemImage: String) -> some View {
-        Label(language.text(key), systemImage: systemImage)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func refreshReceipt() {
+        // A receipt remains active until restoration succeeds, including recovery.
+        receipt = DevicePatchService.latestReceipt(projectID: projectID)
+    }
+
+    @MainActor
+    private func setPatchEnabled(_ enabled: Bool) {
+        guard !isWorking, !store.isBusy, !store.isPatchOperationRunning,
+              !appState.kernelExploitRunning, enabled != (receipt != nil) else { return }
+        if enabled { apply() } else { prepareRestore() }
     }
 
     private func ruleSummary(_ rule: PatchRule) -> some View {
@@ -986,6 +1013,7 @@ struct PatchProjectDetailView: View {
             return
         }
 
+        guard store.beginPatchOperation() else { return }
         let attempt = UUID()
         progressID = attempt
         isWorking = true
@@ -995,8 +1023,10 @@ struct PatchProjectDetailView: View {
 
         Task {
             defer {
+                refreshReceipt()
                 progressID = nil
                 isWorking = false
+                store.endPatchOperation()
             }
             guard await license.checkForApply() else {
                 log("patch: apply stopped by license or maintenance check")
@@ -1014,9 +1044,10 @@ struct PatchProjectDetailView: View {
             do {
                 try await Task.detached(priority: .userInitiated) {
                     report(.preparingWorkspace)
-                    let project = item.summary.schemaVersion >= 2 && item.canInspectContents
+                    var project = item.summary.schemaVersion >= 2 && item.canInspectContents
                         ? try PatchProjectLibrary.synchronizeWorkspace(item: item)
                         : baseProject
+                    if item.isBundled { project.name = item.displayName }
                     _ = try DevicePatchService.apply(project: project, progress: report)
                 }.value
 
@@ -1058,80 +1089,74 @@ struct PatchProjectDetailView: View {
         )
     }
 
+    @MainActor
     private func prepareRestore() {
-        guard let receipt else { return }
+        guard !isWorking, !appState.kernelExploitRunning, let receipt,
+              store.beginPatchOperation() else { return }
         isWorking = true
         operationStarted = Date()
         applyProgress = .restoring
-        Task.detached(priority: .userInitiated) {
+        Task {
+            defer {
+                refreshReceipt()
+                isWorking = false
+                store.endPatchOperation()
+            }
             do {
-                let inspection = try DevicePatchService.inspectRestore(receipt: receipt)
+                let inspection = try await Task.detached(priority: .userInitiated) {
+                    let inspection = try DevicePatchService.inspectRestore(receipt: receipt)
+                    if inspection.changedTargets.isEmpty {
+                        try DevicePatchService.restore(receipt: receipt)
+                    }
+                    return inspection
+                }.value
                 if inspection.changedTargets.isEmpty {
-                    try DevicePatchService.restore(receipt: receipt)
-                    await MainActor.run {
-                        isWorking = false
-                        actionAlert = PatchStoreAlert(
-                            titleKey: "common.done",
-                            messageKey: "patch.restored_message"
-                        )
-                    }
+                    actionAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.restored_message")
                 } else {
-                    await MainActor.run {
-                        isWorking = false
-                        restoreChangedPaths = inspection.changedTargets.map(\.displayPath)
-                        showChangedRestoreConfirmation = true
-                    }
+                    restoreChangedPaths = inspection.changedTargets.map(\.displayPath)
+                    showChangedRestoreConfirmation = true
                 }
             } catch let error as PatchPackageError {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: privateErrorKey(for: error),
-                        messageArgument: privateErrorArgument(for: error)
-                    )
-                }
+                actionAlert = PatchStoreAlert(
+                    titleKey: "common.failed",
+                    messageKey: privateErrorKey(for: error),
+                    messageArgument: privateErrorArgument(for: error)
+                )
             } catch {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: "patch.error.restore"
-                    )
-                }
+                actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.restore")
             }
         }
     }
 
+    @MainActor
     private func restore(allowChangedTargets: Bool) {
-        guard let receipt else { return }
+        guard !isWorking, !appState.kernelExploitRunning, let receipt,
+              store.beginPatchOperation() else { return }
         isWorking = true
         operationStarted = Date()
         applyProgress = .restoring
-        Task.detached(priority: .userInitiated) {
+        Task {
+            defer {
+                refreshReceipt()
+                isWorking = false
+                store.endPatchOperation()
+            }
             do {
-                try DevicePatchService.restore(
-                    receipt: receipt,
-                    allowChangedTargets: allowChangedTargets
-                )
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.restored_message")
-                }
-            } catch let error as PatchPackageError {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(
-                        titleKey: "common.failed",
-                        messageKey: privateErrorKey(for: error),
-                        messageArgument: privateErrorArgument(for: error)
+                try await Task.detached(priority: .userInitiated) {
+                    try DevicePatchService.restore(
+                        receipt: receipt,
+                        allowChangedTargets: allowChangedTargets
                     )
-                }
+                }.value
+                actionAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.restored_message")
+            } catch let error as PatchPackageError {
+                actionAlert = PatchStoreAlert(
+                    titleKey: "common.failed",
+                    messageKey: privateErrorKey(for: error),
+                    messageArgument: privateErrorArgument(for: error)
+                )
             } catch {
-                await MainActor.run {
-                    isWorking = false
-                    actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.restore")
-                }
+                actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.restore")
             }
         }
     }
@@ -1209,7 +1234,7 @@ struct AppliedPatchRecoveryView: View {
                         } label: {
                             Label(language.text("patch.restore"), systemImage: "arrow.uturn.backward.circle")
                         }
-                        .disabled(isWorking || appState.kernelExploitRunning)
+                        .disabled(isWorking || store.isBusy || store.isPatchOperationRunning || appState.kernelExploitRunning)
                     }
                 }
             }
@@ -1254,10 +1279,10 @@ struct AppliedPatchRecoveryView: View {
     }
 
     private func title(for transaction: ActivePatchTransaction) -> String {
+        let item = store.items.first(where: { $0.id == transaction.receipt.projectID })
+        if let item, item.isBundled { return item.displayName }
         if let name = transaction.projectName, !name.isEmpty { return name }
-        if let name = store.items.first(where: { $0.id == transaction.receipt.projectID })?.project?.name {
-            return name
-        }
+        if let item { return item.displayName }
         return language.text("patch.recovery.previous")
     }
 
@@ -1267,11 +1292,11 @@ struct AppliedPatchRecoveryView: View {
 
     @MainActor
     private func inspect(_ transaction: ActivePatchTransaction) {
-        guard !isWorking, !appState.kernelExploitRunning else { return }
+        guard !isWorking, !appState.kernelExploitRunning, store.beginPatchOperation() else { return }
         isWorking = true
         let receipt = transaction.receipt
         Task {
-            defer { isWorking = false }
+            defer { isWorking = false; store.endPatchOperation() }
             do {
                 let result = try await Task.detached(priority: .userInitiated) {
                     try DevicePatchService.inspectRestore(receipt: receipt)
@@ -1285,11 +1310,11 @@ struct AppliedPatchRecoveryView: View {
 
     @MainActor
     private func restore(_ transaction: ActivePatchTransaction, allowChangedTargets: Bool) {
-        guard !isWorking, !appState.kernelExploitRunning else { return }
+        guard !isWorking, !appState.kernelExploitRunning, store.beginPatchOperation() else { return }
         isWorking = true
         let receipt = transaction.receipt
         Task {
-            defer { isWorking = false }
+            defer { isWorking = false; store.endPatchOperation() }
             do {
                 try await Task.detached(priority: .userInitiated) {
                     try DevicePatchService.restore(receipt: receipt, allowChangedTargets: allowChangedTargets)

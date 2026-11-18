@@ -39,6 +39,12 @@ struct PatchLibraryItem: Identifiable {
     }
 
     var id: UUID { summary.packageID }
+    var displayName: String {
+        if isBundled, let name = PatchPackageCodec.bundledDisplayName(for: id) {
+            return name
+        }
+        return project?.name ?? packageURL.deletingPathExtension().lastPathComponent
+    }
     var isLocked: Bool { project == nil }
     var canInspectContents: Bool {
         guard !isBundled, let project else { return false }

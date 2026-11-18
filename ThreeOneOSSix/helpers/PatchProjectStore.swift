@@ -24,6 +24,7 @@ struct PatchStoreAlert: Identifiable {
 final class PatchProjectStore: ObservableObject {
     @Published private(set) var items: [PatchLibraryItem] = []
     @Published private(set) var isBusy = false
+    @Published private(set) var isPatchOperationRunning = false
     @Published var passwordRequest: PatchPasswordRequest?
     @Published var alert: PatchStoreAlert?
     @Published var unlockErrorKey: String?
@@ -37,6 +38,16 @@ final class PatchProjectStore: ObservableObject {
     }
 
     private var pendingUnlock: PendingUnlock?
+
+    func beginPatchOperation() -> Bool {
+        guard !isBusy, !isPatchOperationRunning else { return false }
+        isPatchOperationRunning = true
+        return true
+    }
+
+    func endPatchOperation() {
+        isPatchOperationRunning = false
+    }
 
     init() {
         isBusy = true

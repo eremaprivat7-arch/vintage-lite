@@ -72,11 +72,38 @@ do {
     check(stillPatched == firstBytes, "the failed apply leaves the old patch intact")
     let inspection = try PatchTransaction.inspectRestore(receipt: recoveredReceipt, containerResolver: resolve)
     check(inspection.changedTargets.isEmpty, "unchanged replacement can be restored normally")
+    // OFF must not be reported when restoration fails during a file operation.
+    do {
+        try PatchTransaction.restore(
+            receipt: recoveredReceipt,
+            containerResolver: resolve,
+            beforeWrite: { _ in throw NSError(domain: "FixtureRestoreFailure", code: 1) }
+        )
+        check(false, "an interrupted restore must report failure")
+    } catch PatchPackageError.restoreFailed {}
+    check(PatchTransaction.latestReceipt(projectID: first.id, backupRoot: backups) != nil,
+          "the switch remains ON after a failed restore")
+    check(try Data(contentsOf: target) == firstBytes,
+          "failed restoration preserves the applied file")
     try PatchTransaction.restore(receipt: recoveredReceipt, containerResolver: resolve)
     let restored = try Data(contentsOf: target)
     check(restored == original, "recovery restores the actual saved original")
     check(PatchTransaction.activeTransactions(backupRoot: backups).isEmpty, "restoration removes the active lock")
     check(PatchTransaction.appliedTargetKeys(backupRoot: backups).isEmpty, "restored journals no longer occupy files")
+    // ON is read from the committed journal, never from the user's tap.
+    do {
+        _ = try PatchTransaction.apply(
+            project: next,
+            backupRoot: backups,
+            containerResolver: resolve,
+            beforeWrite: { _ in throw NSError(domain: "FixtureApplyFailure", code: 1) }
+        )
+        check(false, "an interrupted apply must report failure")
+    } catch PatchPackageError.applyFailed {}
+    check(PatchTransaction.latestReceipt(projectID: next.id, backupRoot: backups) == nil,
+          "the switch stays OFF after an apply is rolled back")
+    check(try Data(contentsOf: target) == original,
+          "a failed apply leaves the original file intact")
     let nextReceipt = try PatchTransaction.apply(project: next, backupRoot: backups, containerResolver: resolve)
     let nextData = try Data(contentsOf: target)
     check(nextData == nextBytes, "the replacement patch applies after recovery")

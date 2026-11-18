@@ -16,6 +16,19 @@ for case let url as URL in files where ["3105", "3106"].contains(url.pathExtensi
                 password: PatchPackageCodec.bundledPassword(for: summary.packageID)
             )
             precondition(decoded.project.id == summary.packageID)
+            if url.deletingLastPathComponent().lastPathComponent == "FPSBoost" {
+                let requiredNames = [
+                    "AIM BODY (8).3105": "BODY VINTAGE",
+                    "DRAG VINTAGE (2).3105": "DRAG VINTAGE",
+                    "NECK VINTAGE.3105": "NECK VINTAGE"
+                ]
+                if let expected = requiredNames[url.lastPathComponent] {
+                    precondition(
+                        PatchPackageCodec.bundledDisplayName(for: summary.packageID) == expected,
+                        "Incorrect bundled Boost display name"
+                    )
+                }
+            }
             checked += 1
         } catch PatchPackageError.invalidPasswordOrCorruptedPackage {
             // The bundled Boost catalog must open with its configured passwords.

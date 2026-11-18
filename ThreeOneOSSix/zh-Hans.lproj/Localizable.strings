@@ -1272,3 +1272,7 @@
 "patch.recovery.restored" = "原始文件已恢复，现在可以应用新补丁。";
 "patch.recovery.confirm" = "请关闭目标应用。此操作会恢复已保存的原始文件，并停用所选补丁。";
 "patch.recovery.changed_again" = "检查后游戏文件再次发生变化。请重新点击恢复并查看确认信息后再继续。";
+
+"patch.toggle.title" = "补丁";
+"patch.toggle.hint" = "ON 应用补丁，OFF 恢复已保存的原始文件。请先关闭目标应用。";
+"patch.toggle.busy" = "另一个补丁操作正在进行。";

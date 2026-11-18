@@ -1272,3 +1272,7 @@
 "patch.recovery.restored" = "Đã khôi phục bản gốc. Bạn có thể áp dụng bản vá mới.";
 "patch.recovery.confirm" = "Đóng ứng dụng đích. Thao tác này khôi phục các bản gốc đã lưu và vô hiệu hóa bản vá đã chọn.";
 "patch.recovery.changed_again" = "Tệp trò chơi đã thay đổi sau khi kiểm tra. Nhấn Khôi phục lần nữa để xem xác nhận trước khi tiếp tục.";
+
+"patch.toggle.title" = "Bản vá";
+"patch.toggle.hint" = "ON áp dụng bản vá. OFF khôi phục các tệp gốc đã lưu. Hãy đóng ứng dụng đích trước.";
+"patch.toggle.busy" = "Một thao tác bản vá khác đang diễn ra.";

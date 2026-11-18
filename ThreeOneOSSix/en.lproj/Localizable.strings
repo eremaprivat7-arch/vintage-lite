@@ -1272,3 +1272,7 @@
 "patch.recovery.restored" = "Originals restored. You can now apply the new patch.";
 "patch.recovery.confirm" = "Close the target app. This restores the saved originals and deactivates the selected patch.";
 "patch.recovery.changed_again" = "The game files changed after inspection. Tap Restore again to review the confirmation before continuing.";
+
+"patch.toggle.title" = "Patch";
+"patch.toggle.hint" = "ON applies the patch. OFF restores the saved originals. Close the target app first.";
+"patch.toggle.busy" = "Another patch operation is in progress.";
