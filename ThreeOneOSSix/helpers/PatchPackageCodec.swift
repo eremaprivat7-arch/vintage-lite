@@ -22,6 +22,7 @@ enum PatchPackageCodec {
     static func bundledDisplayName(for packageID: UUID) -> String? {
         switch packageID.uuidString {
         case "19622EA2-FC49-49B9-A1F6-899F877F1709": return "BODY VINTAGE"
+        case "2E1B9941-FC5C-5348-B718-F8218943AD7A": return "DRAG VINTAGEE"
         case "DE9BE9BE-63F4-42C3-8B01-64F535CDF98A": return "DRAG VINTAGE"
         case "DECE4310-133B-45CB-B04C-9E71E9CF0F25": return "NECK VINTAGE"
         default: return nil

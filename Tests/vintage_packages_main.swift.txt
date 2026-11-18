@@ -19,7 +19,7 @@ for case let url as URL in files where ["3105", "3106"].contains(url.pathExtensi
             if url.deletingLastPathComponent().lastPathComponent == "FPSBoost" {
                 let requiredNames = [
                     "BODY VINTAGELT.3105": "BODY VINTAGE",
-                    "DRAG VINTAGE.3105": "DRAG VINTAGE",
+                    "DRAG VINTAGEE.3105": "DRAG VINTAGEE",
                     "NECK VINTAGE.3105": "NECK VINTAGE"
                 ]
                 if let expected = requiredNames[url.lastPathComponent] {
@@ -28,6 +28,20 @@ for case let url as URL in files where ["3105", "3106"].contains(url.pathExtensi
                         "Incorrect bundled Boost display name"
                     )
                 }
+            }
+            if url.lastPathComponent == "DRAG VINTAGEE.3105" {
+                let originalURL = url.deletingLastPathComponent().appendingPathComponent("NECK VINTAGE.3105")
+                let originalData = try Data(contentsOf: originalURL)
+                let originalSummary = try PatchPackageCodec.inspect(originalData)
+                let original = try PatchPackageCodec.decode(
+                    originalData,
+                    password: PatchPackageCodec.bundledPassword(for: originalSummary.packageID)
+                )
+                precondition(decoded.project.id != original.project.id, "The copy must have a separate identity")
+                precondition(decoded.project.name == "DRAG VINTAGEE")
+                precondition(decoded.project.rules == original.project.rules, "Copied replacement bytes must be preserved")
+                precondition(decoded.project.directories == original.project.directories)
+                precondition(decoded.project.bundleIdentifiers == original.project.bundleIdentifiers)
             }
             checked += 1
         } catch PatchPackageError.invalidPasswordOrCorruptedPackage {
