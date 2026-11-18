@@ -121,7 +121,10 @@ enum PatchProjectLibrary {
                        let cached = try? PatchPackageCodec.decode(data, contentKey: key) {
                         decoded = cached
                     } else {
-                        decoded = try? PatchPackageCodec.decode(data, password: "@osinxshop")
+                        decoded = try? PatchPackageCodec.decode(
+                            data,
+                            password: PatchPackageCodec.bundledPassword(for: summary.packageID)
+                        )
                         if let decoded { try? PatchKeyStore.store(decoded.contentKey, for: summary) }
                     }
                 } else if let contentKey = try PatchKeyStore.load(for: summary) {

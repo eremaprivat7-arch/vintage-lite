@@ -11,6 +11,14 @@ enum PatchPackageCodec {
     static let latestSchemaVersion = 3
     private static let minimumSchemaVersion = 1
 
+    // Passwords for the bundled catalog; selected by package identity.
+    static func bundledPassword(for packageID: UUID) -> String {
+        if packageID.uuidString == "19622EA2-FC49-49B9-A1F6-899F877F1709" {
+            return "11"
+        }
+        return "@osinxshop"
+    }
+
     private static func canRead(version: Int) -> Bool {
         (minimumSchemaVersion...latestSchemaVersion).contains(version) || version == 9
     }

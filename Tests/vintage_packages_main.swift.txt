@@ -11,10 +11,17 @@ for case let url as URL in files where ["3105", "3106"].contains(url.pathExtensi
         let data = try Data(contentsOf: url)
         let summary = try PatchPackageCodec.inspect(data)
         do {
-            let decoded = try PatchPackageCodec.decode(data, password: "@osinxshop")
+            let decoded = try PatchPackageCodec.decode(
+                data,
+                password: PatchPackageCodec.bundledPassword(for: summary.packageID)
+            )
             precondition(decoded.project.id == summary.packageID)
             checked += 1
         } catch PatchPackageError.invalidPasswordOrCorruptedPackage {
+            // The bundled Boost catalog must open with its configured passwords.
+            if url.deletingLastPathComponent().lastPathComponent == "FPSBoost" {
+                throw PatchPackageError.invalidPasswordOrCorruptedPackage
+            }
             // Keep packages with another password. The app prompts for it on opening.
             needsPassword += 1
             print("PASSWORD REQUIRED: \(url.lastPathComponent)")

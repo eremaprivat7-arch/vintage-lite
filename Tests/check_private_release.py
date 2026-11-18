@@ -15,14 +15,14 @@ assert info["CFBundleIdentifier"] == "com.apple.mobile.MobileHouseArrest"
 assert info["CFBundleDisplayName"] == "VintageLite"
 assert info["LicenseServerURL"] == "https://vintage-lite-license.vintage-lite-keys.workers.dev"
 assert info["RemotePatchCatalogEnabled"] is False
-assert info["CFBundleShortVersionString"] == "2.2.11"
-assert info["CFBundleVersion"] == "22"
+assert info["CFBundleShortVersionString"] == "2.2.12"
+assert info["CFBundleVersion"] == "23"
 assert info["UIFileSharingEnabled"] is False
 assert info["LSSupportsOpeningDocumentsInPlace"] is False
 assert 'path = "../ThreeOneOSFive/Patches"' in project
 assert "F37A0001 /* Patches in Resources */" in project
-assert "MARKETING_VERSION = 2.2.11;" in project
-assert "CURRENT_PROJECT_VERSION = 22;" in project
+assert "MARKETING_VERSION = 2.2.12;" in project
+assert "CURRENT_PROJECT_VERSION = 23;" in project
 assert project.count("INFOPLIST_KEY_CFBundleDisplayName = VintageLite;") == 2
 entitlements = plistlib.loads((APP / "ThreeOneOSSix.entitlements").read_bytes())
 assert entitlements["com.apple.security.application-groups"]
@@ -55,7 +55,7 @@ for field in (
 library = (APP / "helpers/PatchProjectLibrary.swift").read_text()
 assert 'resources.appendingPathComponent("Patches", isDirectory: true)' in library
 assert 'collect(root, bundled: false)' in library
-assert 'password: "@osinxshop"' in library
+assert 'password: PatchPackageCodec.bundledPassword(for: summary.packageID)' in library
 screen = (APP / "views/PatchProjectsView.swift").read_text()
 assert "struct PatchProjectDetailView" in screen
 assert "guard await license.checkForApply()" in screen
